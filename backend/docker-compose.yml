@@ -1,0 +1,59 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    network_mode: "host"
+    container_name: python_backend
+    ports:
+      - "4003:4003"
+    depends_on:
+      - mongodb
+      - qdrant
+    env_file: .env
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    network_mode: "host"
+    ports:
+      - "6333:6333" # HTTP port
+      - "6334:6334" # gRPC port
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT_ALLOW_CORS=true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readiness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  product_loader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    network_mode: "host"
+    depends_on:
+      - qdrant
+    command: uv run python -m scripts.load_products_to_qdrant
+    env_file: .env
+
+  mongodb:
+    image: mongo:latest
+    network_mode: "host"
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=password
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  qdrant_data:
+  mongodb_data:

@@ -1,0 +1,135 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Conversational Commerce Backend"
+readme = "README.md"
+requires-python = ">=3.12, <3.13"
+dependencies = [
+    "aiohttp>=3.11.15",
+    "dependency-injector>=4.46.0",
+    "fastapi>=0.115.12",
+    "gunicorn>=23.0.0",
+    "langchain-openai>=0.3.12",
+    "langchain-qdrant>=0.2.0",
+    "langgraph>=0.3.24",
+    "neo4j>=5.20.0",
+    "neo4j-graphrag>=0.1.0",
+    "numpy>=2.2.4",
+    "pandas>=2.2.3",
+    "pydantic>=2.11.1",
+    "pydantic-settings>=2.8.1",
+    "python-multipart>=0.0.20",
+    "qdrant-client>=1.13.3",
+    "sqlalchemy>=2.0.40",
+    "uvicorn>=0.34.0",
+    "motor>=3.4.0",
+    "pymongo>=4.6.2",
+]
+
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+    "pytest-cov>=6.1.0",
+    "pytest-sugar>=1.0.0",
+    "ruff>=0.11.2",
+]
+
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+
+[tool.ruff]
+extend-select = [
+    "E", # flake8 excluding black Conflicts
+    "I", # isort
+    "N", # pep8-naming
+    "D", # pydocstyle
+    "UP", # pyupgrade
+    "PD", # pandas -vet
+    "ANN001", # flake8-annotations missing-type-function-argument
+    "T20", # flake8-print
+    "TID", # flake8-tidy-imports
+    "ASYNC", #flake8-async
+]
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+line-length = 120
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+# Assume Python {{ cookiecutter.python_version }}
+target-version = "py312"
+
+# Ignore `E402` (import violations) in all `__init__.py` files, and in `path/to/file.py`.
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["E402", "F401"]
+"**/{tests,docs,tools}/*" = ["D", "ANN"]
+"**/infrastructure/repositories/postgresql/product_repository.py" = ["E501"]
+"**/infrastructure/repositories/hard_coded/prompt_repository.py" = ["E501"]
+"**/infrastructure/agents/*.py" = ["E501"]
+
+[tool.ruff.lint]
+# On top of the Google convention, disable `D100` and `D104`, which require
+# documentation for every public package and public module respectively.
+ignore = ["D100", "D104"]
+
+[tool.ruff.pydocstyle]
+convention = "google"
+
+[tool.ruff.pep8-naming]
+# Allow Pydantic's `@field_validator`, `root_validator`, and `model_validator` decorator to trigger class method treatment.
+classmethod-decorators = ["pydantic.field_validator", "pydantic.v1.root_validator", "pydantic.model_validator"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+addopts = "-v --cov=conversational-commerce-backend --cov-report term-missing --force-sugar"
+
+[tool.black]
+line-length = 120
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''

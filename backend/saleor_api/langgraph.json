@@ -1,0 +1,14 @@
+{
+	"dependencies": [
+		"langchain_openai",
+		"langchain_core",
+		"python-dotenv",
+		"langgraph",
+		"langchain_community",
+		"."
+	],
+	"graphs": {
+		"saleor_graph": "./new_salor_graph.py:app"
+	},
+	"env": "./.env"
+}

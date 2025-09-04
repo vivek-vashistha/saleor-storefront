@@ -42,3 +42,25 @@ next-env.d.ts
 
 .idea/
 .pnpm-store
+
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+*.env
+env/
+env.bak/
+
+# Idea
+.idea
+
+# VS Code configs
+.vscode
+*-service-account.json
+.DS_Store
+.venv
+venv
+.langgraph_api

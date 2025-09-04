@@ -2,6 +2,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Suspense, type ReactNode } from "react";
 import { type Metadata } from "next";
+import { ClientProviders } from "./providers"; // new client wrapper
 import { DraftModeNotification } from "@/ui/components/DraftModeNotification";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -20,10 +21,12 @@ export default function RootLayout(props: { children: ReactNode }) {
 	return (
 		<html lang="en" className="min-h-dvh">
 			<body className={`${inter.className} min-h-dvh`}>
-				{children}
-				<Suspense>
-					<DraftModeNotification />
-				</Suspense>
+				<ClientProviders>
+					{children}
+					<Suspense>
+						<DraftModeNotification />
+					</Suspense>
+				</ClientProviders>
 			</body>
 		</html>
 	);

@@ -6,11 +6,14 @@ from logging import config as logging_config
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from copilotkit import CopilotKitSDK, LangGraphAgent
+from copilotkit.integrations.fastapi import add_fastapi_endpoint
 
 from backend.presentation.api.containers import Container
 from backend.presentation.api.middlewares import ExceptionHandlingMiddleware
 from backend.presentation.api.routes import v1_router, welcome_router
 from backend.presentation.api.routes.copilot import router as copilot_router
+from backend.presentation.api.copilotkit_adapter import ConversationalCommerceAdapter
 from backend.settings.logging import LoggerSettings
 
 
@@ -42,6 +45,28 @@ def create_app() -> FastAPI:
     )
 
     application.container = container
+    
+    # Create adapter for our SearchQueryWorkflow
+    workflow = container.application.search_query_workflow()
+    adapter = ConversationalCommerceAdapter(workflow)
+    
+    # Initialize CopilotKit SDK with LangGraph agent
+    sdk = CopilotKitSDK(
+        agents=[
+            LangGraphAgent(
+                name="conversational_commerce_agent",
+                description="Agent handling conversational commerce workflows for outdoor gear recommendations",
+                graph=adapter,
+            )
+        ],
+    )
+    
+    # Log successful initialization
+    print("CopilotKit SDK initialized with conversational commerce agent")
+
+    # Add CopilotKit endpoint
+    add_fastapi_endpoint(application, sdk, "/copilotkit_remote")
+    
     application.include_router(welcome_router, tags=["Welcome"])
     application.include_router(v1_router)
     

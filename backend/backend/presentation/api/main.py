@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.presentation.api.containers import Container
 from backend.presentation.api.middlewares import ExceptionHandlingMiddleware
 from backend.presentation.api.routes import v1_router, welcome_router
+from backend.presentation.api.routes.copilot import router as copilot_router
 from backend.settings.logging import LoggerSettings
 
 
@@ -33,15 +34,19 @@ def create_app() -> FastAPI:
     application.add_middleware(ExceptionHandlingMiddleware)  # type: ignore
     application.add_middleware(
         CORSMiddleware,  # type: ignore
-        allow_origins=["*"],
+        allow_origins=["*"],  # Allow all origins for development
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
+        expose_headers=["*"],  # Expose headers for CopilotKit
     )
 
     application.container = container
     application.include_router(welcome_router, tags=["Welcome"])
     application.include_router(v1_router)
+    
+    # Include CopilotKit routes at root level (no /v1 prefix)
+    application.include_router(copilot_router, tags=["CopilotKit"])
 
     return application
 

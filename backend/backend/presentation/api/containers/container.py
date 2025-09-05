@@ -11,6 +11,8 @@ class Container(containers.DeclarativeContainer):
         modules=[
             "backend.presentation.api.routes.v1.chat",
             "backend.presentation.api.routes.v1.session",
+            "backend.presentation.api.routes.copilot",
+            "backend.presentation.api.routes.v1.copilot_actions",
             "backend.presentation.api.routes.welcome_router",
         ]
     )

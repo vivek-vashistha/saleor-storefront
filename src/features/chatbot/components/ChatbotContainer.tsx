@@ -77,19 +77,19 @@ const ChatbotContainer: React.FC = () => {
 
   return (
     <>
-      {/* “Need help?” badge when closed */}
-      {!isOpen && (
-        <div className="fixed bottom-10 right-26 z-[1299] bg-[#176142] text-white px-2 py-1.5 rounded-full shadow-md max-w-[180px] flex items-center gap-2">
-          <p className="text-xs font-medium font-sans">Need help with gear?</p>
-        </div>
-      )}
-
-      {/* open/close button */}
-      <div className="fixed bottom-4 right-4 z-[1300]">
+      
+      {/* Launcher: badge (when closed) + button, aligned together */}
+      <div className="fixed bottom-4 right-4 z-[1300] flex items-center gap-2">
+        {!isOpen && (
+          <div className="bg-[#176142] text-white px-2 py-1.5 rounded-full shadow-md max-w-[180px] flex items-center gap-2">
+            <p className="text-xs font-medium font-sans">Need help with gear?</p>
+          </div>
+        )}
         <Button
           onClick={isOpen ? closeChat : openChat}
+          // className={`rounded-full flex items-center justify-center text-white shadow-lg w-14 h-14 ${
           className={`rounded-full flex items-center justify-center text-white shadow-lg ${
-            isOpen ? 'w-14 h-14' : 'w-18 h-18'
+            isOpen ? 'w-12 h-12' : 'w-16 h-16'
           } ${
             isOpen
               ? 'bg-[#64748B] hover:bg-[#64748B]'

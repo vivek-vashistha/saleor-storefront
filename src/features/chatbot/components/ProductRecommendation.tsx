@@ -7,7 +7,7 @@ import {AddShoppingCartIcon} from './ChatIcons';
 import Rating from '@/components/ui/Rating';
 import Alert from './Alert';
 import {useCart} from '@/features/cart/context';
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {Badge} from "@/components/ui/badge";
 import Image from "next/image";
 
@@ -27,6 +27,7 @@ interface ProductProps {
 const ProductRecommendation: React.FC<ProductProps> = ({ product }) => {
   const { addToCart } = useCart();
   const params = useParams<{ channel?: string }>();
+  const router = useRouter();
 
   const resolveChannel = () => {
     // Prefer route param; fallback to first path segment; default to "default-channel"
@@ -52,10 +53,10 @@ const ProductRecommendation: React.FC<ProductProps> = ({ product }) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: product.name, channel }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data: any = await res.json().catch(() => ({} as any));
       console.log("[Chat:AddToCart] response", { status: res.status, data });
       if (!res.ok || !data?.success) {
-        const msg = data?.error || data?.errors?.[0]?.message || "Failed to add to Saleor cart";
+        const msg = (data && (data as any).error) || (data && (data as any).errors && (data as any).errors[0]?.message) || "Failed to add to Saleor cart";
         throw new Error(msg);
       }
       // Optionally also mirror to local cart for the drawer UX
@@ -69,6 +70,8 @@ const ProductRecommendation: React.FC<ProductProps> = ({ product }) => {
         image_url: product.image_url,
         quantity: 1
       });
+      // Refresh server components (e.g., server navbar cart count)
+      try { router.refresh(); } catch {}
       setOpenSnackbar(true);
     } catch (e) {
       console.error("[Chat:AddToCart] error", e);

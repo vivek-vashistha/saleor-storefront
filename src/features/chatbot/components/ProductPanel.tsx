@@ -5,7 +5,7 @@ import {Button} from '@/components/ui/button';
 import {AddShoppingCartIcon} from './ChatIcons';
 import Alert from './Alert';
 import {useCart} from '@/features/cart/context';
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {BundleCarousel} from "./BundleCarousel";
 import {Product, ProductPanelProps} from '@/features/chatbot/types';
 import {ArrowLeft, ArrowRight} from 'lucide-react';
@@ -13,6 +13,7 @@ import {ArrowLeft, ArrowRight} from 'lucide-react';
 const ProductPanel: React.FC<ProductPanelProps> = ({allBundles = [], messageType = 'product_bundle_recommendation'}) => {
     const {addToCart} = useCart();
     const params = useParams<{ channel?: string }>();
+    const router = useRouter();
 
     const resolveChannel = () => {
         const fromParams = params?.channel;
@@ -36,33 +37,54 @@ const ProductPanel: React.FC<ProductPanelProps> = ({allBundles = [], messageType
         try {
             const channel = resolveChannel();
             console.log("[Chat:AddAllToCart] channel", channel);
-            if (currentBundle?.products && currentBundle.products.length > 0) {
-                // Add each product via API to Saleor checkout
-                for (const product of currentBundle.products) {
-                    if (!product) continue;
-                    console.log("[Chat:AddAllToCart] request", { name: product.name, channel });
+            if (!currentBundle?.products || currentBundle.products.length === 0) return;
+
+            const tasks = currentBundle.products.filter(Boolean).map((product) => async () => {
+                try {
+                    console.log("[Chat:AddAllToCart] request", { name: product!.name, channel });
                     const res = await fetch("/api/cart/add", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ name: product.name, channel }),
+                        body: JSON.stringify({ name: product!.name, channel }),
                     });
-                    const data = await res.json().catch(() => ({}));
-                    console.log("[Chat:AddAllToCart] response", { status: res.status, data });
-                    if (!res.ok || !data?.success) {
-                        console.warn("[Chat:AddAllToCart] failed", { name: product.name, data });
-                        continue;
+                    const data: any = await res.json().catch(() => ({} as any));
+                    console.log("[Chat:AddAllToCart] response", { name: product!.name, status: res.status, data });
+                    const success = res.ok && data?.success;
+                    if (success) {
+                        // Update local cart immediately for responsive count updates
+                        addToCart({
+                            product_id: product!.product_id,
+                            name: product!.name,
+                            price: product!.price,
+                            image_url: product!.image_url,
+                            quantity: 1,
+                        });
+                        // Ask Next.js to refresh server components (navbar count)
+                        try { router.refresh(); } catch {}
                     }
-                    // Mirror to local cart for drawer UX
-                    addToCart({
-                        product_id: product.product_id,
-                        name: product.name,
-                        price: product.price,
-                        image_url: product.image_url,
-                        quantity: 1
-                    });
+                    return { product, success } as const;
+                } catch (e) {
+                    console.warn("[Chat:AddAllToCart] failed", { name: product!.name, error: e });
+                    return { product, success: false } as const;
                 }
-                setOpenSnackbar(true);
-            }
+            });
+
+            const runWithConcurrency = async <T,>(fns: Array<() => Promise<T>>, limit = 5) => {
+                const results: T[] = [];
+                let cursor = 0;
+                const workers = new Array(Math.min(limit, fns.length)).fill(0).map(async () => {
+                    while (cursor < fns.length) {
+                        const i = cursor++;
+                        results[i] = await fns[i]!();
+                    }
+                });
+                await Promise.all(workers);
+                return results;
+            };
+
+            await runWithConcurrency(tasks, 5);
+
+            setOpenSnackbar(true);
         } catch (error) {
             console.error("Error adding products to cart:", error);
         }
@@ -79,10 +101,10 @@ const ProductPanel: React.FC<ProductPanelProps> = ({allBundles = [], messageType
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ name: product.name, channel }),
                 });
-                const data = await res.json().catch(() => ({}));
+                const data: any = await res.json().catch(() => ({} as any));
                 console.log("[Chat:AddToCart] response", { status: res.status, data });
                 if (!res.ok || !data?.success) {
-                    const msg = data?.error || data?.errors?.[0]?.message || "Failed to add to Saleor cart";
+                    const msg = (data && (data as any).error) || (data && (data as any).errors && (data as any).errors[0]?.message) || "Failed to add to Saleor cart";
                     throw new Error(msg);
                 }
                 addToCart({
@@ -92,6 +114,7 @@ const ProductPanel: React.FC<ProductPanelProps> = ({allBundles = [], messageType
                     image_url: product.image_url,
                     quantity: 1
                 });
+                try { router.refresh(); } catch {}
                 setOpenSnackbar(true);
                 setTimeout(() => setOpenSnackbar(false), 3000);
             }

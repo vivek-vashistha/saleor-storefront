@@ -5,12 +5,24 @@ import {Button} from '@/components/ui/button';
 import {AddShoppingCartIcon} from './ChatIcons';
 import Alert from './Alert';
 import {useCart} from '@/features/cart/context';
+import { useParams } from "next/navigation";
 import {BundleCarousel} from "./BundleCarousel";
 import {Product, ProductPanelProps} from '@/features/chatbot/types';
 import {ArrowLeft, ArrowRight} from 'lucide-react';
 
 const ProductPanel: React.FC<ProductPanelProps> = ({allBundles = [], messageType = 'product_bundle_recommendation'}) => {
     const {addToCart} = useCart();
+    const params = useParams<{ channel?: string }>();
+
+    const resolveChannel = () => {
+        const fromParams = params?.channel;
+        if (fromParams) return fromParams;
+        if (typeof window !== 'undefined') {
+            const seg = window.location.pathname.split('/')[1];
+            if (seg) return seg;
+        }
+        return "default-channel";
+    };
     const [openSnackbar, setOpenSnackbar] = useState(false);
     const [selectedBundleIndex, setSelectedBundleIndex] = useState(0);
 
@@ -20,20 +32,35 @@ const ProductPanel: React.FC<ProductPanelProps> = ({allBundles = [], messageType
     // Use the selected bundle from allBundles
     const currentBundle = allBundles.length > 0 ? allBundles[selectedBundleIndex] : null;
 
-    const handleAddAllToCart = () => {
+    const handleAddAllToCart = async () => {
         try {
+            const channel = resolveChannel();
+            console.log("[Chat:AddAllToCart] channel", channel);
             if (currentBundle?.products && currentBundle.products.length > 0) {
-                currentBundle.products.forEach(product => {
-                    if (product) {
-                        addToCart({
-                            product_id: product.product_id,
-                            name: product.name,
-                            price: product.price,
-                            image_url: product.image_url,
-                            quantity: 1
-                        });
+                // Add each product via API to Saleor checkout
+                for (const product of currentBundle.products) {
+                    if (!product) continue;
+                    console.log("[Chat:AddAllToCart] request", { name: product.name, channel });
+                    const res = await fetch("/api/cart/add", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ name: product.name, channel }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    console.log("[Chat:AddAllToCart] response", { status: res.status, data });
+                    if (!res.ok || !data?.success) {
+                        console.warn("[Chat:AddAllToCart] failed", { name: product.name, data });
+                        continue;
                     }
-                });
+                    // Mirror to local cart for drawer UX
+                    addToCart({
+                        product_id: product.product_id,
+                        name: product.name,
+                        price: product.price,
+                        image_url: product.image_url,
+                        quantity: 1
+                    });
+                }
                 setOpenSnackbar(true);
             }
         } catch (error) {
@@ -41,9 +68,23 @@ const ProductPanel: React.FC<ProductPanelProps> = ({allBundles = [], messageType
         }
     };
 
-    const handleAddToCart = (product: Product) => {
+    const handleAddToCart = async (product: Product) => {
         try {
+            const channel = resolveChannel();
+            console.log("[Chat:AddToCart] channel", channel);
             if (product) {
+                console.log("[Chat:AddToCart] request", { name: product.name, channel });
+                const res = await fetch("/api/cart/add", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: product.name, channel }),
+                });
+                const data = await res.json().catch(() => ({}));
+                console.log("[Chat:AddToCart] response", { status: res.status, data });
+                if (!res.ok || !data?.success) {
+                    const msg = data?.error || data?.errors?.[0]?.message || "Failed to add to Saleor cart";
+                    throw new Error(msg);
+                }
                 addToCart({
                     product_id: product.product_id,
                     name: product.name,
@@ -51,13 +92,11 @@ const ProductPanel: React.FC<ProductPanelProps> = ({allBundles = [], messageType
                     image_url: product.image_url,
                     quantity: 1
                 });
-
-                // Show success message
                 setOpenSnackbar(true);
                 setTimeout(() => setOpenSnackbar(false), 3000);
             }
         } catch (error) {
-            console.error("Error adding product to cart:", error);
+            console.error("[Chat:AddToCart] error", error);
         }
     };
 

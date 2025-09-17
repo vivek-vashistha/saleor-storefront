@@ -7,6 +7,7 @@ import {AddShoppingCartIcon} from './ChatIcons';
 import Rating from '@/components/ui/Rating';
 import Alert from './Alert';
 import {useCart} from '@/features/cart/context';
+import { useParams } from "next/navigation";
 import {Badge} from "@/components/ui/badge";
 import Image from "next/image";
 
@@ -25,23 +26,54 @@ interface ProductProps {
 
 const ProductRecommendation: React.FC<ProductProps> = ({ product }) => {
   const { addToCart } = useCart();
+  const params = useParams<{ channel?: string }>();
+
+  const resolveChannel = () => {
+    // Prefer route param; fallback to first path segment; default to "default-channel"
+    const fromParams = params?.channel;
+    if (fromParams) return fromParams;
+    if (typeof window !== 'undefined') {
+      const seg = window.location.pathname.split('/')[1];
+      if (seg) return seg;
+    }
+    return "default-channel";
+  };
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [imageError, setImageError] = useState(false);
 
-  const handleAddToCart = () => {
-    // Convert string product_id to number if needed
-    const productId = typeof product.product_id === 'string' 
-      ? parseInt(product.product_id, 10) 
-      : (product.product_id as number) || Math.floor(Math.random() * 1000000);
-
-    addToCart({
-      product_id: productId,
-      name: product.name,
-      price: product.price,
-      image_url: product.image_url,
-      quantity: 1
-    });
-    setOpenSnackbar(true);
+  const handleAddToCart = async () => {
+    try {
+      const channel = resolveChannel();
+      console.log("[Chat:AddToCart] channel", channel);
+      // Call server route to search Saleor by name and add to checkout
+      console.log("[Chat:AddToCart] request", { name: product.name, channel });
+      const res = await fetch("/api/cart/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: product.name, channel }),
+      });
+      const data = await res.json().catch(() => ({}));
+      console.log("[Chat:AddToCart] response", { status: res.status, data });
+      if (!res.ok || !data?.success) {
+        const msg = data?.error || data?.errors?.[0]?.message || "Failed to add to Saleor cart";
+        throw new Error(msg);
+      }
+      // Optionally also mirror to local cart for the drawer UX
+      const productId = typeof product.product_id === 'string' 
+        ? parseInt(product.product_id, 10) 
+        : (product.product_id as number) || Math.floor(Math.random() * 1000000);
+      addToCart({
+        product_id: productId,
+        name: product.name,
+        price: product.price,
+        image_url: product.image_url,
+        quantity: 1
+      });
+      setOpenSnackbar(true);
+    } catch (e) {
+      console.error("[Chat:AddToCart] error", e);
+      setOpenSnackbar(true);
+    }
   };
 
   return (

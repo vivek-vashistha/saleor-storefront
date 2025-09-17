@@ -100,11 +100,14 @@ export default async function Page(props: {
 	async function addItem() {
 		"use server";
 
+		console.log("/pdp/addItem start", { channel: params.channel, selectedVariantID });
+
 		const checkout = await Checkout.findOrCreate({
 			checkoutId: await Checkout.getIdFromCookies(params.channel),
 			channel: params.channel,
 		});
 		invariant(checkout, "This should never happen");
+		console.log("/pdp/addItem checkout", { checkoutId: checkout.id });
 
 		await Checkout.saveIdToCookie(params.channel, checkout.id);
 
@@ -112,14 +115,23 @@ export default async function Page(props: {
 			return;
 		}
 
-		// TODO: error handling
-		await executeGraphQL(CheckoutAddLineDocument, {
-			variables: {
-				id: checkout.id,
-				productVariantId: decodeURIComponent(selectedVariantID),
-			},
-			cache: "no-cache",
-		});
+		try {
+			const resp = await executeGraphQL(CheckoutAddLineDocument, {
+				variables: {
+					id: checkout.id,
+					productVariantId: decodeURIComponent(selectedVariantID),
+				},
+				cache: "no-cache",
+			});
+			if (resp.checkoutLinesAdd?.errors?.length) {
+				console.warn("/pdp/addItem mutation errors", resp.checkoutLinesAdd.errors);
+			} else {
+				console.log("/pdp/addItem success", { checkoutId: checkout.id, variantId: selectedVariantID });
+			}
+		} catch (e) {
+			console.error("/pdp/addItem error", e);
+			throw e;
+		}
 
 		revalidatePath("/cart");
 	}

@@ -1,6 +1,9 @@
 import { ProductListByCollectionDocument } from "@/gql/graphql";
 import { executeGraphQL } from "@/lib/graphql";
 import { ProductList } from "@/ui/components/ProductList";
+import Hero from "./Hero";
+import RewardsBar from "./RewardsBar";
+import FeaturedProducts from "./FeaturedProducts";
 
 export const metadata = {
 	title: "ACME Storefront, powered by Saleor & Next.js",
@@ -25,9 +28,17 @@ export default async function Page(props: { params: Promise<{ channel: string }>
 	const products = data.collection?.products.edges.map(({ node: product }) => product);
 
 	return (
-		<section className="mx-auto max-w-7xl p-8 pb-16">
-			<h2 className="sr-only">Product list</h2>
-			<ProductList products={products} />
-		</section>
+		<>
+			{/* <div className="mx-auto max-w-7xl p-4 mb-4 text-center rounded border bg-yellow-50 text-yellow-900">
+				this is the banner
+			</div> */}
+			<Hero />
+			<RewardsBar />
+			<FeaturedProducts/>
+			<section className="mx-auto max-w-7xl p-8 pb-16">
+				<h2 className="sr-only">Product list</h2>
+				<ProductList products={products} />
+			</section>
+		</>
 	);
 }

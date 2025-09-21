@@ -13,7 +13,7 @@ export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps 
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([{
     type: 'bot',
-    content: "Hi there! I'm your outdoor gear advisor. Tell me about your planned activities, experience level, and any specific needs, and I'll recommend the perfect gear for your adventure.",
+    content: "Hi there! I'm your product advisor. Tell me about your health goals, concerns, or the vitamins, supplements, sports nutrition, beauty or grocery items you’re looking for, and I’ll recommend the best options.",
     timestamp: new Date().toISOString(),
   }]);
   const [isLoading, setIsLoading] = useState(false);

@@ -5,10 +5,130 @@ import * as Checkout from "@/lib/checkout";
 import { CheckoutAddLineDocument, ProductDetailsDocument, SearchProductsDocument, ProductOrderField, OrderDirection } from "@/gql/graphql";
 
 function sanitizeName(name: string): string {
-    // Normalize apostrophes and remove common gender suffix anywhere in the string
-    // e.g. " - Men's" / "- Womens" / "- Women's" / "- Mens"
-    const normalized = name.replace(/[’']/g, "'");
-    return normalized.replace(/\s*-\s*(Men's|Womens|Women's|Mens)\b/gi, "").trim();
+    // Normalize apostrophes and remove common symbols/encoding artifacts/punctuation noise
+    let normalized = name
+        .replace(/[’']/g, "'")
+        .replace(/[®™]/g, "")
+        .replace(/Â/g, "")
+        // Remove anything in parentheses which often contains dosage/pack info
+        .replace(/\([^)]*\)/g, "")
+        // Replace commas and other punctuation with spaces
+        .replace(/[,:;|]/g, " ");
+
+    // Remove common gender suffix anywhere in the string
+    normalized = normalized.replace(/\s*-\s*(Men's|Womens|Women's|Mens)\b/gi, "");
+
+    // Collapse extra whitespace
+    normalized = normalized.replace(/\s+/g, " ").trim();
+    return normalized;
+}
+
+function buildSearchVariants(raw: string, sanitized: string): string[] {
+    const variants: string[] = [];
+    const add = (s?: string) => { const v = (s || "").trim(); if (v) variants.push(v); };
+
+    // Start with raw and sanitized
+    add(raw);
+    add(sanitized);
+
+    // Remove parentheses variants
+    const noParenRaw = raw.replace(/\([^)]*\)/g, "").replace(/\s+/g, " "); add(noParenRaw);
+    const noParenSan = sanitized.replace(/\([^)]*\)/g, "").replace(/\s+/g, " "); add(noParenSan);
+
+    // No punctuation variant
+    const noPunct = noParenSan.replace(/[^a-z0-9\s]/gi, " ").replace(/\s+/g, " "); add(noPunct);
+
+    // Token-based queries
+    const tokens = noPunct
+        .split(/\s+/)
+        .map((t) => t.trim())
+        .filter((t) => t.length >= 2);
+    if (tokens.length) {
+        const top = tokens.slice(0, 6).join(" ");
+        add(top);
+
+        // Try brand + keyword if detectable
+        // Heuristic: brand is text before first comma in raw
+        const brand = (raw.split(",")[0] || tokens[0] || "").trim();
+        const keywords = [
+            "probiotic",
+            "probiotics",
+            "magnesium",
+            "melatonin",
+            "collagen",
+            "vitamin",
+            "b12",
+            "coq10",
+            "creatine",
+            "capsules",
+            "caps",
+            "powder",
+            "gummies",
+        ];
+        const primary = tokens.find((t) => keywords.includes(t.toLowerCase())) || "";
+        if (brand) {
+            add(brand);
+            if (primary) add(`${brand} ${primary}`);
+        }
+    }
+
+    // Comma-separated parts from raw (e.g., brand, specific line, pack info)
+    raw.split(",").map((s) => s.trim()).forEach((part) => add(part));
+
+    // De-duplicate while preserving order
+    return Array.from(new Set(variants));
+}
+
+function slugify(input: string): string {
+    return input
+        .toLowerCase()
+        .normalize("NFKD")
+        .replace(/[’']/g, "")
+        .replace(/[®™]/g, "")
+        .replace(/Â/g, "")
+        // Keep measurement info from parentheses by turning parens into spaces
+        .replace(/[()]/g, " ")
+        .replace(/&/g, " and ")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "");
+}
+
+function buildSlugCandidates(raw: string, sanitized: string): string[] {
+    const candidates: string[] = [];
+    const add = (s?: string) => { const v = (s || "").trim(); if (v) candidates.push(slugify(v)); };
+
+    add(raw);
+    add(sanitized);
+    add(raw.replace(/\([^)]*\)/g, ""));
+    add(sanitized.replace(/\([^)]*\)/g, ""));
+
+    // comma parts often include brand and product line
+    raw.split(",").forEach((p) => add(p));
+
+    // Brand + primary keyword
+    const brand = (raw.split(",")[0] || "").trim();
+    const primaryKeywords = [
+        "probiotic",
+        "probiotics",
+        "magnesium",
+        "melatonin",
+        "collagen",
+        "vitamin",
+        "b12",
+        "coq10",
+        "creatine",
+        "capsules",
+        "caps",
+        "powder",
+        "gummies",
+    ];
+    const tokens = sanitized.replace(/[^a-z0-9\s]/gi, " ").split(/\s+/).filter(Boolean);
+    const primary = tokens.find((t) => primaryKeywords.includes(t.toLowerCase()));
+    if (brand) add(brand);
+    if (brand && primary) add(`${brand} ${primary}`);
+
+    return Array.from(new Set(candidates));
 }
 
 export async function POST(req: NextRequest) {
@@ -61,20 +181,87 @@ export async function POST(req: NextRequest) {
             name: e?.node?.name as string,
             slug: e?.node?.slug as string,
         }));
-        const primary = nodes.filter(p => p.name.toLowerCase().includes(query.toLowerCase()));
+        const primary = nodes.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()));
         const loosen = (s: string) => s
             .toLowerCase()
             .replace(/men's|mens|women's|womens/gi, "")
             .replace(/[^a-z0-9\s]/gi, "")
             .trim();
         const target = loosen(query);
-        const secondary = nodes.filter(p => !primary.includes(p) && (loosen(p.name) === target || loosen(p.name).includes(target)));
-        const others = nodes.filter(p => !primary.includes(p) && !secondary.includes(p));
-        const candidates = [...primary, ...secondary, ...others].slice(0, 10);
+        const primarySlugs = new Set(primary.map((p) => p.slug));
+        const secondary = nodes.filter(
+            (p) => !primarySlugs.has(p.slug) && (loosen(p.name) === target || loosen(p.name).includes(target))
+        );
+        const secondarySlugs = new Set(secondary.map((p) => p.slug));
+        const others = nodes.filter((p) => !primarySlugs.has(p.slug) && !secondarySlugs.has(p.slug));
+        let candidates: Array<{ name: string; slug: string }> = [...primary, ...secondary, ...others].slice(0, 10);
 
         if (candidates.length === 0) {
-            console.warn("/api/cart/add no match", { query });
-            return NextResponse.json({ error: "No matching product found" }, { status: 404 });
+            console.warn("/api/cart/add no match — trying fallback search variants", { query });
+            const variants = buildSearchVariants(name, query);
+            for (const v of variants) {
+                if (!v) continue;
+                const retryVars = { ...searchVars, search: v } as const;
+                const retryResp = await executeGraphQL(SearchProductsDocument, {
+                    variables: retryVars,
+                    cache: "no-cache",
+                    withAuth: false,
+                });
+                const retryEdges = (retryResp.products?.edges ?? []) as any[];
+                if (retryEdges.length > 0) {
+                    const retryNodes: Array<{ name: string; slug: string }> = retryEdges.map((e: any) => ({
+                        name: e?.node?.name as string,
+                        slug: e?.node?.slug as string,
+                    }));
+                    const retryPrimary = retryNodes.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()));
+                    const retryPrimarySlugs = new Set(retryPrimary.map((p) => p.slug));
+                    const retrySecondary = retryNodes.filter((p) => !retryPrimarySlugs.has(p.slug));
+                    candidates = [...retryPrimary, ...retrySecondary].slice(0, 10);
+                    console.log("/api/cart/add recovered candidates via variant", { variant: v, count: candidates.length });
+                    break;
+                }
+            }
+            if (candidates.length === 0) {
+                // Try slug-based lookup as a last resort: some Saleor setups match slugs better than name search
+                console.warn("/api/cart/add still no match — trying slug candidates", { query });
+                const slugCandidates = buildSlugCandidates(name, query);
+                for (const s of slugCandidates) {
+                    try {
+                        const det = await executeGraphQL(ProductDetailsDocument, {
+                            variables: { slug: s, channel },
+                            cache: "no-cache",
+                            withAuth: false,
+                        });
+                        if (det.product?.slug) {
+                            candidates = [{ name: det.product.name, slug: det.product.slug }];
+                            console.log("/api/cart/add recovered via slug", { slug: det.product.slug });
+                            break;
+                        }
+                    } catch {}
+                }
+                if (candidates.length === 0) {
+                    // As a very last resort, try the last token as a potential slug tail
+                    const tokens = query.replace(/[^a-z0-9\s]/gi, " ").split(/\s+/).filter(Boolean);
+                    const tail = tokens[tokens.length - 1];
+                    if (tail) {
+                        const guess = slugify(tail);
+                        try {
+                            const det = await executeGraphQL(ProductDetailsDocument, {
+                                variables: { slug: guess, channel },
+                                cache: "no-cache",
+                                withAuth: false,
+                            });
+                            if (det.product?.slug) {
+                                candidates = [{ name: det.product.name, slug: det.product.slug }];
+                                console.log("/api/cart/add recovered via tail slug", { slug: det.product.slug });
+                            }
+                        } catch {}
+                    }
+                    if (candidates.length === 0) {
+                        return NextResponse.json({ error: "No matching product found" }, { status: 404 });
+                    }
+                }
+            }
         }
 
         // Iterate candidates to find first with in-stock variant

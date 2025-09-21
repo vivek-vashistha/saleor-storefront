@@ -81,8 +81,8 @@ const ChatbotContainer: React.FC = () => {
       {/* Launcher: badge (when closed) + button, aligned together */}
       <div className="fixed bottom-4 right-4 z-[1300] flex items-center gap-2">
         {!isOpen && (
-          <div className="bg-[#176142] text-white px-2 py-1.5 rounded-full shadow-md max-w-[180px] flex items-center gap-2">
-            <p className="text-xs font-medium font-sans">Need help with gear?</p>
+          <div className="bg-[#176142] text-white px-2 py-1.5 rounded-full shadow-md max-w-[220px] flex items-center gap-2">
+            <p className="text-xs font-medium font-sans">Need help with products?</p>
           </div>
         )}
         <Button
@@ -204,7 +204,7 @@ const ChatbotContainer: React.FC = () => {
                         id="chatbot-title"
                         className="font-sans font-semibold text-lg text-[#020617]"
                       >
-                        OUTDOOR GEAR ADVISOR
+                        IHERB PRODUCT ADVISOR
                       </h6>
                     </header>
                     <UserDisplay />

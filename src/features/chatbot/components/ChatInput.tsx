@@ -379,7 +379,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
         <Input
           ref={inputRef}
           className="flex-1 font-sans text-base pr-10 border border-[#E2E8F0]"
-          placeholder="Ask me about outdoor gear... (type @ to tag products)"
+          placeholder="Ask me about products (vitamins, supplements, beauty, grocery)... (type @ to tag products)"
           value={inputText}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}

@@ -16,8 +16,8 @@ class EnrichmentResponse(BaseModel):
 
     response: str = Field(description="Naturally flowing sentence to continue conversation before asking questions")
     questions: list[str] = Field(
-        description="List of questions to ask the user to get more details to better understanding their needs "
-        "for outdoor gear and equipment."
+        description="List of questions to ask the user to get more details to better understand their needs "
+        "for the products (vitamins, supplements, sports nutrition, beauty, personal care, grocery)."
     )
 
 
@@ -54,23 +54,23 @@ IMPORTANT: Use this user profile information to personalize your questions. For 
             [
                 (
                     "system",
-                    f"""You are an expert at analyzing conversations about outdoor gear and equipment.
+                    f"""You are an expert at analyzing conversations about health, wellness and products (vitamins, supplements, sports nutrition, beauty, personal care, grocery).
                     Your task is to generate 2-3 specific questions to gather more information from the user
-                    to better understand their needs for outdoor gear and equipment.
+                    to better understand their needs for products.
 
                     Focus on asking questions about:
-                    1. Specific product types they might be interested in
-                    2. Key features or requirements they need
-                    3. Activities or use cases they have in mind
-                    4. Environmental conditions they'll be using the gear in
-                    5. User preferences like budget, brand preferences, etc.
+                    1. Specific product types they might be interested in (e.g., probiotics, magnesium, collagen, vitamin B12)
+                    2. Key needs or constraints (e.g., sugar-free, vegan, allergen-free, capsule vs. powder vs. gummy)
+                    3. Use cases or health goals (e.g., gut health, sleep, energy, skin, sports recovery)
+                    4. Dietary or medical considerations (e.g., diabetes, pregnancy, medications)
+                    5. User preferences like budget, brand preferences, flavors, etc.
 
                     Make your questions conversational, specific, and contextually appropriate based on what the user has already shared.
                     
                     {user_context}
                     
                     CRITICAL: If the user has mentioned health conditions (like diabetes, sugar problems, etc.), 
-                    make sure to ask questions that consider their health needs when recommending gear or products.
+                    make sure to ask questions that consider their health needs when recommending supplements or products.
                     """,
                 )
             ]

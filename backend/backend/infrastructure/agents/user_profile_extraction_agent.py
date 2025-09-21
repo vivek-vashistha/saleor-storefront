@@ -77,18 +77,18 @@ class UserProfileExtractionAgent(IAgent[ChatState]):
         prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
-                """You are an expert at extracting user profile information from conversations about outdoor gear and equipment.
+                """You are an expert at extracting user profile information from conversations about health, wellness and products (vitamins, supplements, sports nutrition, beauty, personal care, and grocery).
 
 Your task is to analyze the conversation and extract relevant user information in the following categories:
 
 1. **Identity & Profile**: Name, email, age, location
 2. **Health & Medical**: Health conditions, dietary restrictions, medications
-3. **Preferences**: Activity preferences, product preferences, budget range
-4. **Goals & Aspirations**: Fitness goals, adventure plans
-5. **Behavior & Habits**: Experience level, frequency of use
-6. **Constraints & Boundaries**: Physical limitations, time constraints
+3. **Preferences**: Health interests, product preferences (e.g., probiotics, magnesium, collagen), budget range
+4. **Goals & Aspirations**: Health goals (e.g., better sleep, gut health, energy),
+5. **Behavior & Habits**: Supplement experience/usage, frequency of use
+6. **Constraints & Boundaries**: Allergies, intolerances, dietary restrictions, physical limitations, time constraints
 7. **Relationships & Social**: Group size, family considerations
-8. **Practical Information**: Climate conditions, storage limitations
+8. **Practical Information**: Storage limitations, form factor preferences (capsule, powder, gummy)
 
 IMPORTANT GUIDELINES:
 - Only extract information that is explicitly mentioned or clearly implied

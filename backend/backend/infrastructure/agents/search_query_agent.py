@@ -37,30 +37,31 @@ class SearchQueryAgent(IAgent[ChatState]):
         """
         # Predefined list of allowed categories
         allowed_categories = [
-            "tent",
-            "sleeping gear",
-            "backpacks",
-            "camp kitchen",
-            "camp hydration",
-            "camp furniture",
-            "lighting",
-            "gadgets and gears",
-            "hiking clothing",
-            "hiking footwear",
-            "health and safety",
-            "kids camping gear",
-            "camp hydration",
-            "hiking clothing",
-            "camp and hike deals",
-            "camp electronics",
-            "climbing shoes",
-            "climbing harnesses",
-            "climbing hardware",
-            "climbing ropes",
-            "webbing and cords",
-            "essentials",
-            "climbing clothing",
-            "beverages",
+            "Gut Health",
+            "Probiotics",
+            "Children's Health",
+            "Amino Acids",
+            "Creatine",
+            "Sleep",
+            "Brain & Cognitive",
+            "Magnesium",
+            "Coenzyme Q10 (Ubiquinone)",
+            "Vitamin B12 (Cobalamin)",
+            "Vitamin B",
+            "Adaptogens",
+            "Weight Management",
+            "Grocery",
+            "Baking, Flour & Mixes",
+            "Body Butter",
+            "Medicine Cabinet",
+            "Bone, Joint & Cartilage",
+            "Hair, Skin & Nails",
+            "Vitamins",
+            "Supplements",
+            "Sports Nutrition",
+            "Beauty",
+            "Personal Care",
+            "Grocery",
         ]
 
         # Build user context from profile
@@ -83,31 +84,24 @@ IMPORTANT: Use this user profile information to enhance search queries. For exam
             logger.info("No user profile context available for search query generation")
 
         system_prompt = f"""You are a product search expert. Your task is to analyze a conversation
-and extract multiple relevant search queries for finding outdoor gear and equipment.
+and extract multiple relevant search queries for finding the products (vitamins, supplements, sports nutrition, beauty, personal care, grocery).
 
 For each distinct product or need mentioned in the conversation, generate a separate search query.
 
 Focus on identifying:
-1. Specific product types (e.g., tent, backpack, hiking boots)
-2. Key features or requirements (e.g., waterproof, lightweight, durable)
-3. Activities or use cases (e.g., hiking, camping, climbing)
-4. Environmental conditions (e.g., winter, rainy, hot)
-5. User preferences (e.g., budget-friendly, premium quality)
+1. Specific product types (e.g., probiotics, magnesium, collagen, vitamin B12, creatine)
+2. Key needs or constraints (e.g., sugar-free, vegan, allergen-free, capsule vs. powder vs. gummy)
+3. Use cases or health goals (e.g., gut health, sleep, energy, skin, sports recovery)
+4. Dietary or medical considerations (e.g., diabetes, pregnancy, medications)
+5. User preferences (e.g., budget-friendly, premium quality, brand, flavor)
 
 You MUST ONLY use categories from this allowed list: {{categories_str}}.
 If a product doesn't clearly fit into one of these categories, match it to the closest category.
 
-IMPORTANT: For beverage-related queries (juices, drinks, beverages):
-- Use the "beverages" category for actual drink products (juices, etc.)
-- Use "camp hydration" for portable drink containers, water bottles, and hydration equipment
-- Use "essentials" for general drink-related gear and accessories
-- Use "camp kitchen" for drink preparation equipment
-- If someone asks for "juices", "drinks", or "beverages", use the "beverages" category
-
 {user_context}
 
 CRITICAL: If the user has health conditions (like diabetes, sugar problems, etc.), 
-make sure to include health-related search terms and consider their specific needs when generating queries.
+make sure to include health-related search terms (e.g., sugar-free, low glycemic) and consider their specific needs when generating queries.
 """
 
         # Create a prompt for generating search queries with categories from conversation

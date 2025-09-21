@@ -13,8 +13,8 @@ from backend.infrastructure.agents.interfaces import IAgent
 logger = logging.getLogger("conversational_commerce")
 
 
-class UserProfileExtraction(BaseModel):
-    """Represents extracted user profile information."""
+class LLMUserProfileExtraction(BaseModel):
+    """Represents extracted user profile information from LLM (no cart fields)."""
     
     # Identity & Profile
     name: str = Field(default="", description="User's name if mentioned")
@@ -51,6 +51,15 @@ class UserProfileExtraction(BaseModel):
     # Practical Information
     climate_conditions: List[str] = Field(default_factory=list, description="Climate conditions mentioned")
     storage_limitations: List[str] = Field(default_factory=list, description="Storage limitations mentioned")
+
+class UserProfileExtraction(LLMUserProfileExtraction):
+    """Represents extracted user profile information with cart augmentation."""
+
+    # Cart Details (augmented from state, not LLM extraction)
+    cart_line_count: int = Field(default=0, description="Number of items (sum of quantities) currently in the cart")
+    cart_currency: str = Field(default="", description="Currency code for cart prices")
+    last_checkout_id: str = Field(default="", description="Last seen Saleor checkout ID associated with the cart")
+    cart_items: List[dict] = Field(default_factory=list, description="Recent snapshot of cart items")
 
 
 class UserProfileExtractionAgent(IAgent[ChatState]):
@@ -110,10 +119,13 @@ Return the information in a structured format that can be parsed."""
         conversation_text = self._format_messages_for_extraction(messages)
         
         try:
-            chain = prompt | self.llm.with_structured_output(UserProfileExtraction)
-            extraction_result = await chain.ainvoke({"conversation_text": conversation_text})
-            
-            logger.info(f"Extracted user profile information: {extraction_result}")
+            chain = prompt | self.llm.with_structured_output(LLMUserProfileExtraction, method="function_calling")
+            extraction_result_llm = await chain.ainvoke({"conversation_text": conversation_text})
+            # Convert LLM-only result to our full model
+            extraction_result = UserProfileExtraction(**extraction_result_llm.model_dump())
+
+            # Note: This is the base extraction from conversation messages only (no cart).
+            logger.info(f"Extracted base user profile information (from messages): {extraction_result}")
             return extraction_result
             
         except Exception as e:
@@ -258,10 +270,36 @@ Return the information in a structured format that can be parsed."""
                 profile_updates['storage_limitations'] = profile_extraction.storage_limitations
                 logger.info(f"Extracted storage limitations: {profile_extraction.storage_limitations}")
             
+            # Merge cart details from existing state into profile updates (persist cart in profile)
+            try:
+                cart_line_count = getattr(state.user_profile, 'cart_line_count', 0)
+                cart_items = getattr(state.user_profile, 'cart_items', []) or []
+                if cart_line_count or cart_items:
+                    profile_updates['cart_line_count'] = cart_line_count
+                    profile_updates['cart_currency'] = getattr(state.user_profile, 'cart_currency', None)
+                    profile_updates['last_checkout_id'] = getattr(state.user_profile, 'last_checkout_id', None)
+                    profile_updates['cart_items'] = cart_items
+
+                    # Also augment the extraction object for logging purposes
+                    try:
+                        profile_extraction.cart_line_count = cart_line_count or 0
+                        profile_extraction.cart_currency = getattr(state.user_profile, 'cart_currency', '') or ''
+                        profile_extraction.last_checkout_id = getattr(state.user_profile, 'last_checkout_id', '') or ''
+                        profile_extraction.cart_items = cart_items
+                    except Exception:
+                        pass
+            except Exception:
+                logger.exception("Failed to merge cart details into extracted profile", exc_info=True)
+
             # Update the user profile if we found any information
             if profile_updates:
                 state.update_user_profile(profile_updates)
                 logger.info(f"Updated user profile with {len(profile_updates)} fields: {list(profile_updates.keys())}")
+                # Log the final extracted profile including cart details
+                try:
+                    logger.info(f"Extracted user profile information: {profile_extraction}")
+                except Exception:
+                    pass
             else:
                 logger.info("No user profile information extracted from conversation")
             

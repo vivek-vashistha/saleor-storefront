@@ -179,6 +179,30 @@ class ProcessChatMessageUseCase:
             if session.state.has_user_profile:
                 # logger.info(f"User profile available: {session.state.user_profile.get_relevant_context('general')}")
                 profile = session.state.user_profile
+                # Build a unified log that includes cart details if present
+                try:
+                    cart_line_count = getattr(profile, 'cart_line_count', 0) or 0
+                    cart_items = getattr(profile, 'cart_items', []) or []
+                    cart_currency = getattr(profile, 'cart_currency', None)
+                    last_checkout_id = getattr(profile, 'last_checkout_id', None)
+                    cart_summary_str = ""
+                    if cart_line_count or cart_items:
+                        items_sample = [
+                            {
+                                'name': (it.get('name') if isinstance(it, dict) else None),
+                                'qty': (it.get('quantity') if isinstance(it, dict) else None),
+                            }
+                            for it in cart_items[:5]
+                        ]
+                        more = max(0, len(cart_items) - 5)
+                        more_suffix = f" (+'{more}' more)" if more else ""
+                        cart_summary_str = (
+                            f", cart_line_count={cart_line_count}, cart_currency={cart_currency}, "
+                            f"checkout_id={last_checkout_id}, cart_items(sample)={items_sample}{more_suffix}"
+                        )
+                except Exception:
+                    cart_summary_str = ""
+
                 logger.info(
                     "User profile available: "
                     f"email={profile.email}, "
@@ -186,6 +210,7 @@ class ProcessChatMessageUseCase:
                     f"activity_preferences={profile.activity_preferences}, "
                     f"product_preferences={profile.product_preferences}, "
                     f"budget_range={profile.budget_range}"
+                    f"cart_summary_str={cart_summary_str}"
                 )
             else:
                 logger.info("No user profile information available")

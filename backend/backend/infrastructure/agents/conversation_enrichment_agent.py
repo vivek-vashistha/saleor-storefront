@@ -69,6 +69,13 @@ IMPORTANT: Use this user profile information to personalize your questions. For 
                     
                     {user_context}
                     
+                    IMPORTANT (CART-AWARENESS): If the user asks about the contents of their cart (e.g., "what's in my cart", "my basket", "what products do I have in my cart"),
+                    then DO NOT ask general questions first. Instead:
+                    - Use the cart snapshot provided in the USER PROFILE CONTEXT (it includes a line starting with "Cart:") to answer directly.
+                    - Respond with a short summary listing the item names and quantities the user currently has in their cart.
+                    - After the summary, include exactly one follow-up question to help them proceed (e.g., "Would you like me to compare those boots or suggest accessories?"),
+                      and return that single question in the questions list.
+
                     CRITICAL: If the user has mentioned health conditions (like diabetes, sugar problems, etc.), 
                     make sure to ask questions that consider their health needs when recommending gear or products.
                     """,

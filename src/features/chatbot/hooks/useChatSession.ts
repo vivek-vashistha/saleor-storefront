@@ -1,6 +1,10 @@
 import {useCallback, useState} from 'react';
+import { useParams } from 'next/navigation';
+
 import {Message, Product, ProductBundle} from '@/features/chatbot/types';
 import {initializeSession, deleteSession, sendMessage} from '@/features/chatbot/api';
+import type { CartSummary } from '@/features/chatbot/api/sessionApi';
+
 import { useUser } from '@/context/UserContext';
 
 interface UseChatSessionProps {
@@ -10,6 +14,9 @@ interface UseChatSessionProps {
 
 export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps = {}) => {
   const { user } = useUser();
+  const { channel: channelParam } = useParams<{ channel?: string }>();
+  const channel = channelParam ?? 'default-channel';
+
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([{
     type: 'bot',
@@ -122,13 +129,56 @@ export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps 
     try {
       setIsLoading(true);
 
-      // Initialize the session using the API function
-      // const sessionResponse = await initializeSession();
-      const sessionResponse = await initializeSession(user?.id || 'vivek_001');
+      // Fetch Saleor cart summary to provide shopping context to the chatbot
+      // with a simple localStorage cache per user/channel
+      let cartSummary: CartSummary | undefined = undefined;
+      const cacheKey = `cartSummary:${channel}:${user?.id || 'anon'}`;
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          const { ts, data } = JSON.parse(cached) as { ts: number; data: CartSummary };
+          // 5 minutes staleness window
+          if (Date.now() - ts < 5 * 60 * 1000) {
+            cartSummary = data;
+          }
+        }
+      } catch {}
+
+      if (!cartSummary) {
+        try {
+          const res = await fetch(`/api/cart/summary?channel=${encodeURIComponent(channel)}`, { method: 'GET' });
+          if (res.ok) {
+            cartSummary = await res.json();
+            try {
+              localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: cartSummary }));
+            } catch {}
+          }
+        } catch {
+          // Non-fatal: continue without cart summary
+        }
+      }
+
+      // Log what we are about to send to the backend for debugging
+      try {
+        console.log('[chatbot] cartSummary to backend', {
+          channel,
+          userId: user?.id || 'anon',
+          lineCount: cartSummary?.lineCount,
+          items: cartSummary?.items?.map(i => ({ name: i.productName, qty: i.quantity })),
+        });
+      } catch {}
+
+      // Initialize the session using the API function and include cart summary if available
+      const sessionResponse = await initializeSession(
+        user?.id || 'vivek_001',
+        "",
+        cartSummary,
+      );
 
       if (sessionResponse.id) {
         console.log("Conversation ID: " + sessionResponse.id);
         setConversationId(sessionResponse.id);
+        // Do not post cart summary into the chat UI; it's stored in user profile on backend
       } else {
         throw new Error("Failed to get conversation ID");
       }
@@ -137,7 +187,7 @@ export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps 
     } finally {
       setIsLoading(false);
     }
-  }, [conversationId]);
+  }, [conversationId, channel, user?.id]);
 
   // Function to delete the session if user hasn't sent any messages
   const deleteSessionIfUnused = useCallback(async () => {
@@ -172,8 +222,45 @@ export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps 
       try {
         setIsLoading(true);
 
-        // Step 1: Initialize the session using the API function
-        const sessionResponse = await initializeSession(user?.id || 'vivek_001');
+        // Step 1: Initialize the session using the API function (with cart summary)
+        let cartSummary: CartSummary | undefined = undefined;
+        const cacheKey = `cartSummary:${channel}:${user?.id || 'anon'}`;
+        try {
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) {
+            const { ts, data } = JSON.parse(cached) as { ts: number; data: CartSummary };
+            if (Date.now() - ts < 5 * 60 * 1000) {
+              cartSummary = data;
+            }
+          }
+        } catch {}
+        if (!cartSummary) {
+          try {
+            const res = await fetch(`/api/cart/summary?channel=${encodeURIComponent(channel)}`, { method: 'GET' });
+            if (res.ok) {
+              cartSummary = await res.json();
+              try {
+                localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: cartSummary }));
+              } catch {}
+            }
+          } catch {
+            // ignore
+          }
+        }
+        try {
+          console.log('[chatbot] cartSummary to backend (first message)', {
+            channel,
+            userId: user?.id || 'anon',
+            lineCount: cartSummary?.lineCount,
+            items: cartSummary?.items?.map(i => ({ name: i.productName, qty: i.quantity })),
+          });
+        } catch {}
+        const sessionResponse = await initializeSession(
+          user?.id || 'vivek_001',
+          "",
+          cartSummary,
+        );
+
         // const sessionResponse = await initializeSession();
 
         let sessionId = null;
@@ -181,6 +268,7 @@ export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps 
           console.log("Conversation ID: " + sessionResponse.id);
           sessionId = sessionResponse.id;
           setConversationId(sessionId);
+          // Do not announce cart contents in the chat UI
         } else {
           throw new Error("Failed to get conversation ID");
         }
@@ -244,7 +332,7 @@ export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps 
         setIsLoading(false);
       }
     }
-  }, [conversationId, processBotMessages]);
+  }, [conversationId, processBotMessages, channel, user?.id]);
 
   // Get products data based on the message type
   const getProductsData = () => {

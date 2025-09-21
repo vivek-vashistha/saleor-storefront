@@ -48,6 +48,15 @@ class UserProfile(BaseModel):
     climate_conditions: List[str] = Field(default_factory=list, description="Typical climate conditions they face")
     storage_limitations: List[str] = Field(default_factory=list, description="Storage or space limitations")
     
+    # Cart Details
+    cart_line_count: int = Field(default=0, description="Number of items (sum of quantities) currently in the cart")
+    cart_currency: Optional[str] = Field(default=None, description="Currency code for cart prices")
+    last_checkout_id: Optional[str] = Field(default=None, description="Last seen Saleor checkout ID associated with the cart")
+    cart_items: List[dict] = Field(
+        default_factory=list,
+        description="Recent snapshot of cart items: name, quantity, variant_id, product_slug, unit_price, total_price",
+    )
+    
     # Metadata
     last_updated: Optional[str] = Field(default=None, description="When the profile was last updated")
     
@@ -58,13 +67,15 @@ class UserProfile(BaseModel):
                 if isinstance(value, list) and isinstance(getattr(self, key), list):
                     # Merge lists, avoiding duplicates
                     current_list = getattr(self, key)
-                    if isinstance(value[0], str):
-                        # For string lists, merge and deduplicate
-                        current_list.extend(value)
-                        setattr(self, key, list(set(current_list)))
-                    else:
-                        # For other types, just extend
-                        current_list.extend(value)
+                    if value:
+                        first = value[0]
+                        if isinstance(first, str):
+                            # For string lists, merge and deduplicate
+                            current_list.extend(value)
+                            setattr(self, key, list(set(current_list)))
+                        else:
+                            # For other types (e.g., list[dict] like cart_items), just extend
+                            current_list.extend(value)
                 else:
                     setattr(self, key, value)
         
@@ -105,6 +116,21 @@ class UserProfile(BaseModel):
                 context_parts.append(f"Product preferences: {', '.join(self.product_preferences)}")
             if self.budget_range:
                 context_parts.append(f"Budget range: {self.budget_range}")
+
+            # Cart snapshot (non-sensitive)
+            if getattr(self, 'cart_line_count', 0) and getattr(self, 'cart_items', []):
+                try:
+                    items = self.cart_items[:5]
+                    items_desc = ", ".join([
+                        f"{it.get('name')} (x{it.get('quantity')})"
+                        for it in items if isinstance(it, dict)
+                    ])
+                    more = len(self.cart_items) - len(items)
+                    suffix = f", +{more} more" if more > 0 else ""
+                    context_parts.append(f"Cart: {items_desc}{suffix}; Total items: {self.cart_line_count}")
+                except Exception:
+                    # Ignore formatting issues
+                    pass
 
             return "; ".join(context_parts)
 
@@ -225,7 +251,9 @@ class ChatState(BaseModel):
             self.user_profile.email is not None or
             self.user_profile.health_conditions or
             self.user_profile.activity_preferences or
-            self.user_profile.dietary_restrictions
+            self.user_profile.dietary_restrictions or
+            getattr(self.user_profile, 'cart_line_count', 0) > 0 or
+            bool(getattr(self.user_profile, 'cart_items', []))
         )
 
     def add_message(self, message_content: str, is_human: bool = True) -> None:

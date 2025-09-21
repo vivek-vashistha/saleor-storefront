@@ -38,6 +38,46 @@ async def create_session(
     """
     session = await create_chat_session_use_case.execute(user_data.user_id)
 
+    # If cart summary is provided, persist it into the user's profile
+    if getattr(user_data, "cart_summary", None):
+        try:
+            cs = user_data.cart_summary
+            profile_updates = {
+                "cart_line_count": cs.line_count,
+                "cart_currency": cs.currency,
+                "last_checkout_id": cs.checkout_id,
+                "cart_items": [
+                    {
+                        "name": it.product_name,
+                        "quantity": it.quantity,
+                        "variant_id": it.variant_id,
+                        "product_slug": it.product_slug,
+                        "unit_price": it.unit_price,
+                        "total_price": it.total_price,
+                    }
+                    for it in cs.items
+                ],
+            }
+            session.state.update_user_profile(profile_updates)
+
+            # Persist immediately so future sessions inherit this memory
+            update_chat_session_use_case = Container.application.update_chat_session_use_case()
+            session = await update_chat_session_use_case.execute(session)
+
+            try:
+                logger.info(
+                    "Cart summary persisted to user profile on session create",
+                    extra={
+                        "user_id": user_data.user_id,
+                        "session_id": session.id,
+                        "cart_line_count": cs.line_count,
+                    },
+                )
+            except Exception:
+                pass
+        except Exception:
+            logger.exception("Failed to persist cart summary on session create", exc_info=True)
+
     # Add initial message if provided
     if user_data.content:
         # Call add_message with the new session
@@ -155,6 +195,41 @@ async def add_message(
     # Verify the user ID matches
     if session.user_id != message.user_id:
         raise ServiceError(status_code=status.HTTP_403_FORBIDDEN, detail="User ID does not match session owner")
+
+    # If cart summary is provided with this message, merge it into the profile before processing
+    if getattr(message, "cart_summary", None):
+        try:
+            cs = message.cart_summary
+            profile_updates = {
+                "cart_line_count": cs.line_count,
+                "cart_currency": cs.currency,
+                "last_checkout_id": cs.checkout_id,
+                "cart_items": [
+                    {
+                        "name": it.product_name,
+                        "quantity": it.quantity,
+                        "variant_id": it.variant_id,
+                        "product_slug": it.product_slug,
+                        "unit_price": it.unit_price,
+                        "total_price": it.total_price,
+                    }
+                    for it in cs.items
+                ],
+            }
+            session.state.update_user_profile(profile_updates)
+            try:
+                logger.info(
+                    "Cart summary merged into user profile on message",
+                    extra={
+                        "user_id": message.user_id,
+                        "session_id": session.id,
+                        "cart_line_count": cs.line_count,
+                    },
+                )
+            except Exception:
+                pass
+        except Exception:
+            logger.exception("Failed to merge cart summary from message", exc_info=True)
 
     # Process the message using the ProcessChatMessageUseCase
     updated_session, message_index = await process_chat_message_use_case.execute(

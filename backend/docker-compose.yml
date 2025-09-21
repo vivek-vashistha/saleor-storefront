@@ -23,7 +23,7 @@ services:
     environment:
       - QDRANT_ALLOW_CORS=true
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/readiness"]
+      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -54,6 +54,42 @@ services:
       timeout: 10s
       retries: 3
 
+  redis:
+    image: redis:7-alpine
+    network_mode: "host"
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    network_mode: "host"
+    depends_on:
+      - redis
+      - mongodb
+    command: uv run celery -A backend.infrastructure.celery_app worker --loglevel=info --queues=memory_consolidation,memory_processing,memory_cleanup
+    env_file: .env
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    network_mode: "host"
+    depends_on:
+      - redis
+      - mongodb
+    command: uv run celery -A backend.infrastructure.celery_app beat --loglevel=info
+    env_file: .env
+
 volumes:
   qdrant_data:
   mongodb_data:
+  redis_data:

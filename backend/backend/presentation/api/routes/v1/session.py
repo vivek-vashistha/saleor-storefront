@@ -2,7 +2,7 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends
 from starlette import status
 import logging
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("conversational_commerce.session_api")
 
 from backend.application.use_cases import (
     CreateChatSessionUseCase,
@@ -157,9 +157,12 @@ async def add_message(
         raise ServiceError(status_code=status.HTTP_403_FORBIDDEN, detail="User ID does not match session owner")
 
     # Process the message using the ProcessChatMessageUseCase
+    logger.info(f"[SESSION_API] Processing message for session {session_id}, user {message.user_id}")
+    logger.info(f"[SESSION_API] Message content: {message.content[:100]}...")
     updated_session, message_index = await process_chat_message_use_case.execute(
         session=session, message_content=message.content, referenced_product_ids=message.referenced_product_ids
     )
+    logger.info(f"[SESSION_API] Message processing completed for session {session_id}")
 
     # Convert to response model with only new messages
     return ChatMessageResponse.from_entity(updated_session, message_index)

@@ -1,6 +1,8 @@
 from dependency_injector import containers, providers
 
 from backend.application.services import OrderGraphService, OrderService, ProductService, SaleorService
+from backend.application.services.semantic_memory_service import SemanticMemoryService, SemanticMemoryConfig
+from backend.application.services.background_memory_manager import BackgroundMemoryManager
 from backend.application.use_cases import (
     CreateChatSessionUseCase,
     CreateOrderUseCase,
@@ -14,7 +16,16 @@ from backend.application.use_cases import (
     UpdateChatSessionUseCase,
     UpdateOrderUseCase,
 )
+from backend.application.use_cases.memory_management import (
+    GetMemoryInsightsUseCase,
+    ConsolidateUserMemoriesUseCase,
+    InitializeUserMemoryUseCase,
+    RetrieveRelevantMemoriesUseCase,
+    UpdateUserProfileWithMemoriesUseCase,
+    ScheduleMemoryConsolidationUseCase
+)
 from backend.application.workflows import SearchQueryWorkflow
+from backend.application.workflows.enhanced_search_query_workflow import EnhancedSearchQueryWorkflow
 
 
 class ApplicationContainer(containers.DeclarativeContainer):
@@ -26,11 +37,37 @@ class ApplicationContainer(containers.DeclarativeContainer):
     order_repository = providers.Dependency()
     chat_session_repository = providers.Dependency()
     saleor_connection = providers.Dependency()
+    llm = providers.Dependency()
+    ai_settings = providers.Dependency()
+
+    # Memory Services
+    semantic_memory_config = providers.Factory(
+        SemanticMemoryConfig.from_ai_settings,
+        ai_settings=ai_settings
+    )
+
+    semantic_memory_service = providers.Singleton(
+        SemanticMemoryService,
+        config=semantic_memory_config
+    )
+
+    background_memory_manager = providers.Singleton(
+        BackgroundMemoryManager,
+        semantic_memory_service=semantic_memory_service,
+        chat_session_repository=chat_session_repository
+    )
 
     # Workflows
     search_query_workflow = providers.Singleton(
         SearchQueryWorkflow,
         agent_factory=agent_factory,
+    )
+
+    enhanced_search_query_workflow = providers.Singleton(
+        EnhancedSearchQueryWorkflow,
+        llm=llm,
+        semantic_memory_service=semantic_memory_service,
+        background_memory_manager=background_memory_manager
     )
 
     # Services
@@ -117,7 +154,40 @@ class ApplicationContainer(containers.DeclarativeContainer):
     process_chat_message_use_case = providers.Factory(
         ProcessChatMessageUseCase,
         chat_session_repository=chat_session_repository,
-        workflow=search_query_workflow,
+        workflow=enhanced_search_query_workflow,  # Changed from search_query_workflow to enhanced_search_query_workflow
         product_service=product_service,
         order_graph_service=order_graph_service,
+    )
+
+    # Memory Management Use Cases
+    get_memory_insights_use_case = providers.Factory(
+        GetMemoryInsightsUseCase,
+        background_memory_manager=background_memory_manager
+    )
+
+    consolidate_user_memories_use_case = providers.Factory(
+        ConsolidateUserMemoriesUseCase,
+        background_memory_manager=background_memory_manager
+    )
+
+    initialize_user_memory_use_case = providers.Factory(
+        InitializeUserMemoryUseCase,
+        semantic_memory_service=semantic_memory_service,
+        chat_session_repository=chat_session_repository
+    )
+
+    retrieve_relevant_memories_use_case = providers.Factory(
+        RetrieveRelevantMemoriesUseCase,
+        chat_session_repository=chat_session_repository,
+        semantic_memory_service=semantic_memory_service
+    )
+
+    update_user_profile_with_memories_use_case = providers.Factory(
+        UpdateUserProfileWithMemoriesUseCase,
+        chat_session_repository=chat_session_repository
+    )
+
+    schedule_memory_consolidation_use_case = providers.Factory(
+        ScheduleMemoryConsolidationUseCase,
+        background_memory_manager=background_memory_manager
     )

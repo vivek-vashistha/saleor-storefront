@@ -191,7 +191,10 @@ class ProcessChatMessageUseCase:
                 logger.info("No user profile information available")
             
             # Process the message with the workflow
+            workflow_name = self.workflow.__class__.__name__
+            logger.info(f"[PROCESS_CHAT] Using workflow: {workflow_name}")
             session.state = await self.workflow.run(session.state)
+            logger.info(f"[PROCESS_CHAT] Workflow {workflow_name} completed")
 
             # Get product bundles if search queries were generated
             if session.state.has_search_query:

@@ -11,6 +11,7 @@ class Container(containers.DeclarativeContainer):
         modules=[
             "backend.presentation.api.routes.v1.chat",
             "backend.presentation.api.routes.v1.session",
+            "backend.presentation.api.routes.v1.memory",
             "backend.presentation.api.routes.welcome_router",
         ]
     )
@@ -27,5 +28,7 @@ class Container(containers.DeclarativeContainer):
         order_repository=infrastructure.order_repository,
         chat_session_repository=infrastructure.chat_session_repository,
         saleor_connection=infrastructure.saleor_connection,
+        llm=infrastructure.llm,
+        ai_settings=infrastructure.config,
     )
     application.check_dependencies()

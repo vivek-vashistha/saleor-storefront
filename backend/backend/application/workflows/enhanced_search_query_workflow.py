@@ -23,6 +23,7 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
         llm: ChatOpenAI,
         semantic_memory_service: SemanticMemoryService,
         background_memory_manager: BackgroundMemoryManager,
+        agent_factory=None,
         **kwargs
     ):
         """Initialize the enhanced workflow.
@@ -31,11 +32,17 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
             llm: The language model to use
             semantic_memory_service: Service for semantic memory operations
             background_memory_manager: Manager for background memory processing
+            agent_factory: Factory for creating agents (optional, for fallback)
             **kwargs: Additional arguments for other agents
         """
+        # Call parent constructor if agent_factory is provided
+        if agent_factory:
+            super().__init__(agent_factory)
+        
         self.llm = llm
         self.semantic_memory_service = semantic_memory_service
         self.background_memory_manager = background_memory_manager
+        self.agent_factory = agent_factory
         
         # Initialize enhanced agents
         self.enhanced_user_profile_extraction_agent = EnhancedUserProfileExtractionAgent(
@@ -43,12 +50,123 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
             semantic_memory_service=semantic_memory_service
         )
         
-        # Initialize other agents (you would import and initialize the rest)
-        # self.sufficient_detail_agent = ...
-        # self.conversation_enrichment_agent = ...
-        # etc.
+        # Initialize other agents using the factory if available
+        if agent_factory:
+            self.agents = {
+                AgentType.SEARCH_QUERY: agent_factory.create_agent(AgentType.SEARCH_QUERY),
+                AgentType.SUFFICIENT_DETAIL: agent_factory.create_agent(AgentType.SUFFICIENT_DETAIL),
+                AgentType.CONVERSATION_ENRICHMENT: agent_factory.create_agent(AgentType.CONVERSATION_ENRICHMENT),
+                AgentType.CONVERSATION_SATURATION: agent_factory.create_agent(AgentType.CONVERSATION_SATURATION),
+                AgentType.GREETING_DETECTION: agent_factory.create_agent(AgentType.GREETING_DETECTION),
+                AgentType.PRODUCT_REFERENCE: agent_factory.create_agent(AgentType.PRODUCT_REFERENCE),
+            }
+        else:
+            # If no agent_factory, initialize empty agents dict
+            self.agents = {}
         
         self.graph = self._build_graph()
+
+    def _convert_to_regular_chat_state(self, state: EnhancedChatState):
+        """Convert EnhancedChatState to regular ChatState for agent processing.
+        
+        Args:
+            state: The enhanced chat state
+            
+        Returns:
+            Regular ChatState for agent processing
+        """
+        from backend.domain.entities.chat import ChatState, UserProfile
+        
+        return ChatState(
+            messages=state.messages,
+            search_queries=state.search_queries,
+            next_agent=state.next_agent,
+            weather_info=state.weather_info,
+            is_detail_sufficient=state.is_detail_sufficient,
+            is_conversation_saturated=state.is_conversation_saturated,
+            is_greeting=state.is_greeting,
+            user_id=state.user_id,
+            referenced_products=state.referenced_products,
+            user_profile=UserProfile(
+                name=state.user_profile.name,
+                email=state.user_profile.email,
+                age=state.user_profile.age,
+                location=state.user_profile.location,
+                health_conditions=state.user_profile.health_conditions,
+                dietary_restrictions=state.user_profile.dietary_restrictions,
+                medications=state.user_profile.medications,
+                activity_preferences=state.user_profile.activity_preferences,
+                product_preferences=state.user_profile.product_preferences,
+                budget_range=state.user_profile.budget_range,
+                fitness_goals=state.user_profile.fitness_goals,
+                adventure_plans=state.user_profile.adventure_plans,
+                experience_level=state.user_profile.experience_level,
+                frequency_of_use=state.user_profile.frequency_of_use,
+                physical_limitations=state.user_profile.physical_limitations,
+                time_constraints=state.user_profile.time_constraints,
+                group_size=state.user_profile.group_size,
+                family_considerations=state.user_profile.family_considerations,
+                climate_conditions=state.user_profile.climate_conditions,
+                storage_limitations=state.user_profile.storage_limitations,
+                last_updated=state.user_profile.last_updated
+            )
+        )
+
+    def _update_enhanced_state_from_regular(self, enhanced_state: EnhancedChatState, regular_state) -> None:
+        """Update enhanced state with results from regular state processing.
+        
+        Args:
+            enhanced_state: The enhanced chat state to update
+            regular_state: The regular chat state with results
+        """
+        enhanced_state.messages = regular_state.messages
+        enhanced_state.search_queries = regular_state.search_queries
+        enhanced_state.next_agent = regular_state.next_agent
+        enhanced_state.is_detail_sufficient = regular_state.is_detail_sufficient
+        enhanced_state.is_conversation_saturated = regular_state.is_conversation_saturated
+        enhanced_state.is_greeting = regular_state.is_greeting
+        enhanced_state.referenced_products = regular_state.referenced_products
+
+    async def _call_agent_with_fallback(self, state: EnhancedChatState, agent_type: AgentType) -> EnhancedChatState:
+        """Call an agent with fallback handling.
+        
+        Args:
+            state: The enhanced chat state
+            agent_type: The type of agent to call
+            
+        Returns:
+            The updated enhanced chat state
+        """
+        try:
+            logger.info(f"[ENHANCED_WORKFLOW] Starting {agent_type.value} for user {state.user_id}")
+            
+            # Convert to regular ChatState for agent processing
+            regular_state = self._convert_to_regular_chat_state(state)
+            
+            # Call the agent if available
+            if agent_type in self.agents:
+                agent = self.agents[agent_type]
+                regular_state = await agent.process(regular_state)
+                
+                # Update the enhanced state with results
+                self._update_enhanced_state_from_regular(state, regular_state)
+                
+                # Add debug logging for specific agents
+                if agent_type == AgentType.SUFFICIENT_DETAIL:
+                    logger.info(f"[ENHANCED_WORKFLOW] SUFFICIENT_DETAIL result: is_detail_sufficient={state.is_detail_sufficient}")
+                elif agent_type == AgentType.CONVERSATION_SATURATION:
+                    logger.info(f"[ENHANCED_WORKFLOW] CONVERSATION_SATURATION result: is_conversation_saturated={state.is_conversation_saturated}")
+                elif agent_type == AgentType.SEARCH_QUERY:
+                    logger.info(f"[ENHANCED_WORKFLOW] SEARCH_QUERY result: search_queries_count={len(state.search_queries)}")
+            else:
+                logger.warning(f"[ENHANCED_WORKFLOW] {agent_type.value} agent not available, skipping")
+            
+            logger.info(f"[ENHANCED_WORKFLOW] {agent_type.value} completed for user {state.user_id}")
+            return state
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED_WORKFLOW] Error in {agent_type.value} agent: {e}")
+            return state
 
     def _build_graph(self) -> CompiledStateGraph:
         """Build the enhanced workflow graph with Langmem integration.
@@ -188,203 +306,37 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
             return await self.enhanced_user_profile_extraction_agent.process(state)
 
     async def call_sufficient_detail_agent(self, state: EnhancedChatState) -> EnhancedChatState:
-        """Call the sufficient detail agent with memory context.
-
-        Args:
-            state: The current enhanced chat state
-
-        Returns:
-            The updated enhanced chat state
-        """
-        try:
-            logger.info(f"[ENHANCED_WORKFLOW] Starting sufficient detail check for user {state.user_id}")
-            # Retrieve relevant memories for context
-            if state.memory_store and state.user_id:
-                relevant_memories = await state.retrieve_relevant_memories(
-                    query="user preferences and requirements",
-                    semantic_memory_service=self.semantic_memory_service
-                )
-                if relevant_memories:
-                    logger.info(f"[ENHANCED_WORKFLOW] Retrieved {len(relevant_memories)} relevant memories for context")
-                    # Add memory context to the state for the agent to use
-                    state.metadata = getattr(state, 'metadata', {})
-                    state.metadata['relevant_memories'] = relevant_memories
-
-            # Call the original sufficient detail agent
-            # (You would implement this based on your existing agent)
-            # return await self.sufficient_detail_agent.process(state)
-            
-            logger.info(f"[ENHANCED_WORKFLOW] Sufficient detail check completed for user {state.user_id}")
-            # For now, return the state as-is
-            return state
-
-        except Exception as e:
-            logger.error(f"[ENHANCED_WORKFLOW] Error in sufficient detail agent: {e}")
-            return state
+        """Call the sufficient detail agent with memory context."""
+        return await self._call_agent_with_fallback(state, AgentType.SUFFICIENT_DETAIL)
 
     async def call_conversation_enrichment_agent(self, state: EnhancedChatState) -> EnhancedChatState:
-        """Call the conversation enrichment agent with memory context.
-
-        Args:
-            state: The current enhanced chat state
-
-        Returns:
-            The updated enhanced chat state
-        """
-        try:
-            logger.info(f"[ENHANCED_WORKFLOW] Starting conversation enrichment for user {state.user_id}")
-            # Retrieve relevant memories for enrichment context
-            if state.memory_store and state.user_id:
-                relevant_memories = await state.retrieve_relevant_memories(
-                    query="conversation topics and user interests",
-                    semantic_memory_service=self.semantic_memory_service
-                )
-                if relevant_memories:
-                    logger.info(f"[ENHANCED_WORKFLOW] Retrieved {len(relevant_memories)} relevant memories for enrichment")
-                    # Add memory context to the state for the agent to use
-                    state.metadata = getattr(state, 'metadata', {})
-                    state.metadata['enrichment_memories'] = relevant_memories
-
-            # Call the original conversation enrichment agent
-            # (You would implement this based on your existing agent)
-            # return await self.conversation_enrichment_agent.process(state)
-            
-            logger.info(f"[ENHANCED_WORKFLOW] Conversation enrichment completed for user {state.user_id}")
-            # For now, return the state as-is
-            return state
-
-        except Exception as e:
-            logger.error(f"[ENHANCED_WORKFLOW] Error in conversation enrichment agent: {e}")
-            return state
+        """Call the conversation enrichment agent with memory context."""
+        return await self._call_agent_with_fallback(state, AgentType.CONVERSATION_ENRICHMENT)
 
     async def call_conversation_saturation_agent(self, state: EnhancedChatState) -> EnhancedChatState:
-        """Call the conversation saturation agent with memory context.
-
-        Args:
-            state: The current enhanced chat state
-
-        Returns:
-            The updated enhanced chat state
-        """
-        try:
-            logger.info(f"[ENHANCED_WORKFLOW] Starting conversation saturation check for user {state.user_id}")
-            # Retrieve relevant memories for saturation context
-            if state.memory_store and state.user_id:
-                relevant_memories = await state.retrieve_relevant_memories(
-                    query="user decision patterns and conversation completeness",
-                    semantic_memory_service=self.semantic_memory_service
-                )
-                if relevant_memories:
-                    logger.info(f"[ENHANCED_WORKFLOW] Retrieved {len(relevant_memories)} relevant memories for saturation")
-                    # Add memory context to the state for the agent to use
-                    state.metadata = getattr(state, 'metadata', {})
-                    state.metadata['saturation_memories'] = relevant_memories
-
-            # Call the original conversation saturation agent
-            # (You would implement this based on your existing agent)
-            # return await self.conversation_saturation_agent.process(state)
-            
-            logger.info(f"[ENHANCED_WORKFLOW] Conversation saturation check completed for user {state.user_id}")
-            # For now, return the state as-is
-            return state
-
-        except Exception as e:
-            logger.error(f"[ENHANCED_WORKFLOW] Error in conversation saturation agent: {e}")
-            return state
+        """Call the conversation saturation agent with memory context."""
+        return await self._call_agent_with_fallback(state, AgentType.CONVERSATION_SATURATION)
 
     async def call_search_agent(self, state: EnhancedChatState) -> EnhancedChatState:
-        """Call the search agent with memory-enhanced context.
-
-        Args:
-            state: The current enhanced chat state
-
-        Returns:
-            The updated enhanced chat state
-        """
-        try:
-            logger.info(f"[ENHANCED_WORKFLOW] Starting search agent for user {state.user_id}")
-            # Retrieve relevant memories for search context
-            if state.memory_store and state.user_id:
-                relevant_memories = await state.retrieve_relevant_memories(
-                    query="product preferences and search history",
-                    semantic_memory_service=self.semantic_memory_service
-                )
-                if relevant_memories:
-                    logger.info(f"[ENHANCED_WORKFLOW] Retrieved {len(relevant_memories)} relevant memories for search")
-                    # Add memory context to the state for the agent to use
-                    state.metadata = getattr(state, 'metadata', {})
-                    state.metadata['search_memories'] = relevant_memories
-
-            # Call the original search agent
-            # (You would implement this based on your existing agent)
-            # return await self.search_agent.process(state)
-            
-            logger.info(f"[ENHANCED_WORKFLOW] Search agent completed for user {state.user_id}")
-            # For now, return the state as-is
-            return state
-
-        except Exception as e:
-            logger.error(f"[ENHANCED_WORKFLOW] Error in search agent: {e}")
-            return state
+        """Call the search agent with memory-enhanced context."""
+        return await self._call_agent_with_fallback(state, AgentType.SEARCH_QUERY)
 
     async def call_greeting_detection_agent(self, state: EnhancedChatState) -> EnhancedChatState:
-        """Call the greeting detection agent.
-
-        Args:
-            state: The current enhanced chat state
-
-        Returns:
-            The updated enhanced chat state
-        """
-        logger.info(f"[ENHANCED_WORKFLOW] Starting greeting detection for user {state.user_id}")
-        # Call the original greeting detection agent
-        # (You would implement this based on your existing agent)
-        # return await self.greeting_detection_agent.process(state)
-        
-        logger.info(f"[ENHANCED_WORKFLOW] Greeting detection completed for user {state.user_id}")
-        # For now, return the state as-is
-        return state
+        """Call the greeting detection agent."""
+        return await self._call_agent_with_fallback(state, AgentType.GREETING_DETECTION)
 
     async def call_product_reference_agent(self, state: EnhancedChatState) -> EnhancedChatState:
-        """Call the product reference agent with memory context.
-
-        Args:
-            state: The current enhanced chat state
-
-        Returns:
-            The updated enhanced chat state
-        """
-        try:
-            logger.info(f"[ENHANCED_WORKFLOW] Starting product reference processing for user {state.user_id}")
-            # Retrieve relevant memories for product context
-            if state.memory_store and state.user_id:
-                relevant_memories = await state.retrieve_relevant_memories(
-                    query="product interactions and preferences",
-                    semantic_memory_service=self.semantic_memory_service
-                )
-                if relevant_memories:
-                    logger.info(f"[ENHANCED_WORKFLOW] Retrieved {len(relevant_memories)} relevant memories for product context")
-                    # Add memory context to the state for the agent to use
-                    state.metadata = getattr(state, 'metadata', {})
-                    state.metadata['product_memories'] = relevant_memories
-
-            # Call the original product reference agent
-            # (You would implement this based on your existing agent)
-            # return await self.product_reference_agent.process(state)
-            
-            logger.info(f"[ENHANCED_WORKFLOW] Product reference processing completed for user {state.user_id}")
-            # For now, return the state as-is
-            return state
-
-        except Exception as e:
-            logger.error(f"[ENHANCED_WORKFLOW] Error in product reference agent: {e}")
-            return state
+        """Call the product reference agent with memory context."""
+        result = await self._call_agent_with_fallback(state, AgentType.PRODUCT_REFERENCE)
+        # Clear search queries for product reference as per original workflow
+        result.search_queries = []
+        return result
 
     # Routing methods (same as original workflow)
     def route_after_greeting_detection(self, state: EnhancedChatState) -> str:
         """Route after greeting detection."""
         route = "is_greeting" if state.is_greeting else "not_greeting"
-        logger.debug(f"[ENHANCED_WORKFLOW] Routing after greeting detection: {route}")
+        logger.info(f"[ENHANCED_WORKFLOW] Routing after greeting detection: {route} (is_greeting={state.is_greeting})")
         return route
 
     def check_for_referenced_products(self, state: EnhancedChatState) -> str:
@@ -396,19 +348,19 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
     def determine_start_agent(self, state: EnhancedChatState) -> str:
         """Determine which agent to start with."""
         route = "start_with_sufficient_detail" if not state.is_detail_sufficient else "start_with_saturation"
-        logger.debug(f"[ENHANCED_WORKFLOW] Determining start agent: {route}")
+        logger.info(f"[ENHANCED_WORKFLOW] Determining start agent: {route} (is_detail_sufficient={state.is_detail_sufficient})")
         return route
 
     def route_after_sufficient_detail(self, state: EnhancedChatState) -> str:
         """Route after sufficient detail check."""
         route = "insufficient" if not state.is_detail_sufficient else "sufficient"
-        logger.debug(f"[ENHANCED_WORKFLOW] Routing after sufficient detail: {route}")
+        logger.info(f"[ENHANCED_WORKFLOW] Routing after sufficient detail: {route} (is_detail_sufficient={state.is_detail_sufficient})")
         return route
 
     def route_after_saturation_check(self, state: EnhancedChatState) -> str:
         """Route after saturation check."""
         route = "not_saturated" if not state.is_conversation_saturated else "saturated"
-        logger.debug(f"[ENHANCED_WORKFLOW] Routing after saturation check: {route}")
+        logger.info(f"[ENHANCED_WORKFLOW] Routing after saturation check: {route} (is_conversation_saturated={state.is_conversation_saturated})")
         return route
 
     async def start_normal_flow(self, state: EnhancedChatState) -> EnhancedChatState:
@@ -423,9 +375,52 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
 
     async def parallel_enrichment_and_search(self, state: EnhancedChatState) -> EnhancedChatState:
         """Handle parallel enrichment and search."""
-        logger.info(f"[ENHANCED_WORKFLOW] Starting parallel enrichment and search for user {state.user_id}")
-        logger.info(f"[ENHANCED_WORKFLOW] Parallel enrichment and search completed for user {state.user_id}")
-        return state
+        try:
+            logger.info(f"[ENHANCED_WORKFLOW] Starting parallel enrichment and search for user {state.user_id}")
+            
+            # Convert to regular ChatState for agent processing
+            regular_state = self._convert_to_regular_chat_state(state)
+
+            # First run enrichment (this will add the question)
+            if AgentType.CONVERSATION_ENRICHMENT in self.agents:
+                enrichment_agent = self.agents[AgentType.CONVERSATION_ENRICHMENT]
+                enriched_state = await enrichment_agent.process(regular_state)
+                
+                # Save the enrichment messages to preserve the question
+                enrichment_messages = enriched_state.messages.copy()
+                
+                # Then run search on the original state (not using the enriched state)
+                if AgentType.SEARCH_QUERY in self.agents:
+                    search_agent = self.agents[AgentType.SEARCH_QUERY]
+                    search_state = await search_agent.process(regular_state)
+                    
+                    # Use enriched state as base but get the search queries from search state
+                    # This prevents search agent from adding its own messages/questions
+                    enriched_state.search_queries = search_state.search_queries
+                    
+                    # IMPORTANT: Ensure we only use the messages from the enrichment agent
+                    # This prevents multiple questions from appearing
+                    enriched_state.messages = enrichment_messages
+                    
+                    # Update the enhanced state with results
+                    self._update_enhanced_state_from_regular(state, enriched_state)
+                else:
+                    logger.warning(f"[ENHANCED_WORKFLOW] Search agent not available for parallel processing")
+                    self._update_enhanced_state_from_regular(state, enriched_state)
+            else:
+                logger.warning(f"[ENHANCED_WORKFLOW] Enrichment agent not available for parallel processing")
+                # Just run search if enrichment is not available
+                if AgentType.SEARCH_QUERY in self.agents:
+                    search_agent = self.agents[AgentType.SEARCH_QUERY]
+                    search_state = await search_agent.process(regular_state)
+                    self._update_enhanced_state_from_regular(state, search_state)
+            
+            logger.info(f"[ENHANCED_WORKFLOW] Parallel enrichment and search completed for user {state.user_id}")
+            return state
+            
+        except Exception as e:
+            logger.error(f"[ENHANCED_WORKFLOW] Error in parallel enrichment and search: {e}")
+            return state
 
     async def run(self, state) -> EnhancedChatState:
         """Process a chat query and return a response.

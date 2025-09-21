@@ -67,7 +67,8 @@ class ApplicationContainer(containers.DeclarativeContainer):
         EnhancedSearchQueryWorkflow,
         llm=llm,
         semantic_memory_service=semantic_memory_service,
-        background_memory_manager=background_memory_manager
+        background_memory_manager=background_memory_manager,
+        agent_factory=agent_factory
     )
 
     # Services

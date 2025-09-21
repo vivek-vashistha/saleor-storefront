@@ -51,7 +51,8 @@ class ProductReferenceAgent(IAgent[ChatState]):
             [
                 (
                     "system",
-                    """You are a helpful outdoor equipment expert.
+                    """You are a helpful product expert (vitamins, supplements, sports nutrition, beauty, personal care, grocery).
+                    
                     You are given a conversation history and a list of products that have been referenced in the conversation.
                     Your task is to provide helpful context about these products and how they relate to the user's needs.
 

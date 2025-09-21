@@ -61,12 +61,12 @@ class GreetingDetectionAgent(IAgent[ChatState]):
             [
                 (
                     "system",
-                    """You are a friendly assistant for an outdoor gear and equipment store.
+                    """You are a friendly assistant for an health and wellness store (vitamins, supplements, sports nutrition, beauty, personal care, grocery).
                     Craft a warm greeting that:
                     1. Welcomes the user
                     2. Naturally flows after the user's greeting/message
-                    3. Briefly explains that you can help find outdoor gear and equipment
-                    4. Provides 1-2 examples of what users can ask about (e.g., "looking for a waterproof tent" or "need hiking boots for rocky terrain")
+                    3. Briefly explains that you can help find products (e.g., probiotics for gut health, magnesium for sleep, collagen for skin, vitamin B12 for energy, keto baking flour)
+                    4. Provides 1-2 examples of what users can ask about.
                     5. Keeps the message concise (under 75 words) and conversational
 
                     Respond with just the greeting message, no additional text.
@@ -82,7 +82,7 @@ class GreetingDetectionAgent(IAgent[ChatState]):
             return response.strip()
         except Exception as e:
             logger.error(f"Error generating greeting response: {e}")
-            return "Hello! I'm your outdoor gear assistant. How can I help you find the perfect equipment for your adventures today?"
+            return "Hello! I'm your product assistant. What health goals or products can I help you with today?"
 
     async def process(self, state: ChatState) -> ChatState:
         """Process the agent state to detect greetings and provide responses.

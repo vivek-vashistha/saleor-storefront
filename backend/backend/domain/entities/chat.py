@@ -194,6 +194,14 @@ class ChatState(BaseModel):
         default_factory=UserProfile,
         description="User profile information extracted from conversations",
     )
+    # Cached order context so we can reuse without re-calling external APIs
+    last_order_summary: Optional[str] = Field(
+        default=None, description="Most recent extracted order summary for the user"
+    )
+    order_api_cache: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Cache for last order API call (e.g., email, raw response)",
+    )
 
     @computed_field
     def has_search_query(self) -> bool:

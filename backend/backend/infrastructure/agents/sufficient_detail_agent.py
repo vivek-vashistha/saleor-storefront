@@ -32,18 +32,21 @@ class SufficientDetailAgent(IAgent[ChatState]):
         # Create a prompt for determining if the conversation has sufficient detail
         prompt = ChatPromptTemplate.from_messages(
             [
-                (
+                 (
                     "system",
-                    """You are an expert at analyzing conversations about outdoor gear and equipment.
+                    """You are an expert at analyzing conversations about health, wellness, and consumer products.
                     Your task is to determine if a conversation contains sufficient detail to generate
-                    a meaningful product search query.
+                    a meaningful product search query for vitamins, supplements, health products, personal care, and general consumer goods.
 
                     A conversation has sufficient detail if it includes at least 2 of the following:
-                    1. Specific product types (e.g., tent, backpack, hiking boots)
-                    2. Key features or requirements (e.g., waterproof, lightweight, durable)
-                    3. Activities or use cases (e.g., hiking, camping, climbing)
-                    4. Environmental conditions (e.g., winter, rainy, hot)
-                    5. User preferences (e.g., budget-friendly, premium quality)
+                    1. Specific product types (e.g., probiotics, vitamin B12, backpack, hiking boots, skincare, supplements)
+                    2. Key features or requirements (e.g., sugar-free, vegan, waterproof, lightweight, age-appropriate)
+                    3. Use cases or health goals (e.g., gut health, energy, sleep, children's products, outdoor activities)
+                    4. User characteristics (e.g., age, health conditions, dietary restrictions, activity level)
+                    5. User preferences (e.g., budget-friendly, premium quality, brand preferences, specific needs)
+
+                    IMPORTANT: Even simple requests like "probiotics for gut health" 
+                    should be considered sufficient detail as they contain clear product type and target user information.
 
                     Respond with ONLY 'true' if the conversation has sufficient detail, or 'false' if more information is needed.
                     """,

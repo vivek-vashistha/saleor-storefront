@@ -2,7 +2,7 @@ from fastapi import status
 
 from backend.application.interfaces import IChatWorkflow
 from backend.application.services import ProductService, OrderGraphService
-from backend.domain.entities import ChatSession, ChatState
+from backend.domain.entities import ChatSession, ChatState, SearchQuery
 from backend.domain.exceptions import ServiceError
 from backend.infrastructure.repositories import IChatSessionRepository
 
@@ -187,6 +187,19 @@ class ProcessChatMessageUseCase:
                     f"product_preferences={profile.product_preferences}, "
                     f"budget_range={profile.budget_range}"
                 )
+
+                # If we already have the user's email, proactively fetch order context once
+                try:
+                    email_present = bool((profile.email or '').strip())
+                    already_added_orders = any(
+                        isinstance(msg.get('content', ''), str) and ('order' in msg.get('content', '').lower())
+                        for msg in session.state.messages
+                    )
+                    if email_present and not already_added_orders:
+                        logger.info("Email present in profile; preloading user's order status context")
+                        await self._handle_order_queries(session, "orders details")    # users query as order details
+                except Exception as preload_err:
+                    logger.warning(f"Failed to preload orders context: {preload_err}")
             else:
                 logger.info("No user profile information available")
             
@@ -228,6 +241,34 @@ class ProcessChatMessageUseCase:
                         logger.warning("No products retrieved for single query")
             else:
                 logger.info("No search queries generated - no products to retrieve")
+
+        # Log AI responses generated for this user message
+        try:
+            new_messages = session.state.messages[message_index:]
+            for i, m in enumerate(new_messages, start=1):
+                msg_type = m.get("type", "ai")
+                if msg_type == "ai":
+                    content = m.get("content", "")
+                    if isinstance(content, list):
+                        text = " ".join([str(x) for x in content if isinstance(x, (str, int, float))])
+                    else:
+                        text = str(content)
+                    logger.info(f"\n\nAI response {i}: {text}\n\n")
+                elif msg_type == "product_recommendation":
+                    prods = m.get("recommended_products", []) or []
+                    names = [p.get("name") for p in prods if isinstance(p, dict) and p.get("name")]
+                    logger.info(f"\nAI product recommendation ({len(names)}): {names}")
+                elif msg_type == "product_bundle_recommendation":
+                    bundles = m.get("recommended_bundles", []) or []
+                    bundle_info = []
+                    for b in bundles:
+                        if isinstance(b, dict):
+                            label = b.get("category") or b.get("name") or "bundle"
+                            products = b.get("products", []) or []
+                            bundle_info.append(f"{label}({len(products)})")
+                    logger.info(f"\nAI bundle recommendation ({len(bundles)}): {bundle_info}")
+        except Exception as log_err:
+            logger.warning(f"\nFailed to log AI responses: {log_err}")
 
         # Update the session in the repository
         updated_session = await self.chat_session_repository.update_session(session)
@@ -367,12 +408,20 @@ class ProcessChatMessageUseCase:
         try:
             logger.info(f"Calling order graph API with question: '{message_content}', email: {user_email}")
             
-            # Try external API first
-            order_response = await self._call_external_order_api(
-                question=message_content,
-                user_email=user_email,
-                session_id=session.id
-            )
+            # Reuse cache if same email and we recently fetched
+            cached = session.state.order_api_cache or {}
+            if cached.get("email") == user_email and cached.get("raw_response"):
+                logger.info("Using cached order API response for this email")
+                order_response = cached["raw_response"]
+            else:
+                # Try external API first
+                order_response = await self._call_external_order_api(
+                    question=message_content,
+                    user_email=user_email,
+                    session_id=session.id
+                )
+                # Cache raw response and email for reuse within the session
+                session.state.order_api_cache = {"email": user_email, "raw_response": order_response}
             
             logger.info(f"Order API response received: {order_response}")
             
@@ -382,8 +431,22 @@ class ProcessChatMessageUseCase:
             logger.info(f"Extracted final answer: {final_answer}")
             
             if final_answer and final_answer != "No response received from the API." and "error" not in final_answer.lower():
-                # Add the order response to the chat
-                logger.info("Adding order response to chat")
+                # # Optionally enrich with product line items from local store (most recent order)
+                # try:
+                #     orders_for_items = await self.order_graph_service.order_service.get_user_orders(user_email)
+                #     if orders_for_items:
+                #         most_recent_order = max(orders_for_items, key=lambda x: x.created_at)
+                #         if getattr(most_recent_order, "items", None):
+                #             items_summary = "; ".join([
+                #                 f"{getattr(it, 'name', 'Item')} x{getattr(it, 'quantity', 1)}" for it in most_recent_order.items[:5]
+                #             ])
+                #             if items_summary:
+                #                 final_answer = f"{final_answer}\nItems in most recent order: {items_summary}"
+                # except Exception as e:
+                #     logger.warning(f"Failed to append items summary: {e}")
+
+                # Add the order response (with items if available) to the chat
+                logger.info("Adding order response to chat\n")
                 session.state.add_message(final_answer, is_human=False)
             else:
                 # Fallback to local order processing

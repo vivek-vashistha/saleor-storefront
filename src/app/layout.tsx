@@ -4,7 +4,7 @@ import { Suspense, type ReactNode } from "react";
 import { type Metadata } from "next";
 import { ClientProviders } from "./providers"; // new client wrapper
 import { DraftModeNotification } from "@/ui/components/DraftModeNotification";
-import ChatbotContainer from "@/features/chatbot/components/ChatbotContainer";
+import { ChatbotContainer } from "@/features/chatbot/components/ChatbotContainer";
 
 const inter = Inter({ subsets: ["latin"] });
 

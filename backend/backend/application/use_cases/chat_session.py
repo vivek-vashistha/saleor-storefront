@@ -481,13 +481,14 @@ class ProcessChatMessageUseCase:
         """
         import os
         import json
-        import requests
+        import httpx
         import logging
         
         logger = logging.getLogger("conversational_commerce")
         
         try:
-            url = "http://localhost:8002/orders"
+            url = os.getenv("ORDER_GRAPH_API_URL", "http://localhost:8000/v1/saleor/orders")
+            timeout_seconds = float(os.getenv("ORDER_GRAPH_TIMEOUT", "60"))
             
             # Prepare form data - using the exact format that works
             data = {
@@ -502,15 +503,15 @@ class ProcessChatMessageUseCase:
             
             logger.info(f"Calling external API: {url} with data: {data}")
             
-            # Make the request
-            response = requests.post(url, data=data, timeout=30)
-            response.raise_for_status()
-            
-            result = response.json()
+            # Make the request (async, non-blocking)
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, data=data, timeout=timeout_seconds)
+                response.raise_for_status()
+                result = response.json()
             logger.info(f"External API response: {result}")
             return result
             
-        except requests.exceptions.RequestException as e:
+        except httpx.RequestError as e:
             logger.error(f"Error calling external order API: {e}")
             return {
                 "error": f"Failed to call orders API: {str(e)}",

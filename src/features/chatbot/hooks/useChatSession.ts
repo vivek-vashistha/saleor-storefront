@@ -39,7 +39,9 @@ export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps 
 				recommended_bundles?: ProductBundle[];
 			}>,
 		) => {
+			console.log("Processing bot messages:", responseMessages);
 			responseMessages.forEach((message) => {
+				console.log("Processing message:", message);
 				const currentTimestamp = new Date().toISOString();
 
 				if (message.type === "ai") {
@@ -102,6 +104,7 @@ export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps 
 					message.recommended_products &&
 					message.recommended_products.length > 0
 				) {
+					console.log("Processing product recommendation:", message);
 					// Set the message type
 					setMessageType("product_recommendation");
 

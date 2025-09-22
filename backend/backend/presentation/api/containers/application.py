@@ -81,6 +81,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ProductService,
         product_repository=product_repository,
         saleor_service=saleor_service,
+        llm=llm,
     )
 
     order_service = providers.Factory(
@@ -158,6 +159,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         workflow=enhanced_search_query_workflow,  # Changed from search_query_workflow to enhanced_search_query_workflow
         product_service=product_service,
         order_graph_service=order_graph_service,
+        llm=llm,
     )
 
     # Memory Management Use Cases

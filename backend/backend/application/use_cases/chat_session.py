@@ -112,6 +112,7 @@ class ProcessChatMessageUseCase:
         workflow: IChatWorkflow[ChatState],
         product_service: ProductService,
         order_graph_service: OrderGraphService = None,
+        llm=None,
     ):
         """Initialize the ProcessChatMessageUseCase.
 
@@ -120,11 +121,13 @@ class ProcessChatMessageUseCase:
             workflow: The chat workflow for processing messages
             product_service: Service for product-related functionality
             order_graph_service: Service for order-related graph API interactions
+            llm: Language model instance for LLM operations
         """
         self.chat_session_repository = chat_session_repository
         self.workflow = workflow
         self.product_service = product_service
         self.order_graph_service = order_graph_service
+        self.llm = llm
 
     async def execute(
         self, session: ChatSession, message_content: str, referenced_product_ids: list[int] | None = None
@@ -196,7 +199,7 @@ class ProcessChatMessageUseCase:
             session.state = await self.workflow.run(session.state)
             logger.info(f"[PROCESS_CHAT] Workflow {workflow_name} completed")
 
-            # Get product bundles if search queries were generated
+            # Get products based on user intent, not just number of queries
             if session.state.has_search_query:
                 logger.info(f"Found {len(session.state.search_queries)} search queries to process")
                 
@@ -204,22 +207,26 @@ class ProcessChatMessageUseCase:
                 for i, query in enumerate(session.state.search_queries):
                     logger.info(f"Search Query {i+1}: '{query.query}' -> categories: {query.categories}")
                 
-                # Get product bundles using the product service
-                if len(session.state.search_queries) > 1:
-                    logger.info("Multiple search queries found - creating product bundles")
-                    product_bundles = await self.product_service.get_product_bundles_for_queries(
-                        session.state.search_queries
+                # Use LLM to determine if user wants bundles or individual products
+                should_bundle = await self._determine_bundling_intent_with_llm(session.state, message_content)
+                logger.info(f"LLM determined bundling intent: {should_bundle}")
+                
+                if should_bundle:
+                    logger.info("LLM determined user wants bundles - creating intelligent product bundles")
+                    product_bundles = await self.product_service.get_intelligent_product_bundles(
+                        session.state.search_queries, 
+                        user_profile=session.state.user_profile,
+                        max_bundles=3
                     )
 
                     if product_bundles:
-                        logger.info(f"Created {len(product_bundles)} product bundles")
+                        logger.info(f"Created {len(product_bundles)} intelligent product bundles")
                         # Add the product bundles to the AI message
                         session.add_ai_message_with_product_bundles(product_bundles)
                     else:
-                        logger.warning("No product bundles created")
-
+                        logger.warning("No intelligent product bundles created")
                 else:
-                    logger.info("Single search query found - getting individual products")
+                    logger.info("LLM determined user wants individual products - getting product list")
                     products = await self.product_service.get_products_for_query(
                         session.state.search_queries[0], max_num_results=5
                     )
@@ -236,6 +243,127 @@ class ProcessChatMessageUseCase:
         updated_session = await self.chat_session_repository.update_session(session)
 
         return updated_session, message_index
+
+    async def _determine_bundling_intent_with_llm(self, state, message_content: str) -> bool:
+        """Use LLM to determine if user wants bundles or individual products.
+        
+        Args:
+            state: The chat state with user profile and conversation history
+            message_content: The current user message
+            
+        Returns:
+            Boolean indicating whether to create bundles (True) or individual products (False)
+        """
+        import logging
+        logger = logging.getLogger("conversational_commerce")
+        
+        try:
+            from langchain_openai import ChatOpenAI
+            from langchain_core.prompts import ChatPromptTemplate
+            from langchain_core.output_parsers import JsonOutputParser
+            from pydantic import BaseModel, Field
+            
+            # Define the response structure
+            class BundlingIntent(BaseModel):
+                should_bundle: bool = Field(description="Whether the user wants product bundles (True) or individual products (False)")
+                reasoning: str = Field(description="Brief explanation of the decision")
+                confidence: float = Field(description="Confidence score from 0.0 to 1.0")
+            
+            # Get conversation context
+            conversation_history = []
+            for msg in state.messages[-5:]:  # Last 5 messages for context
+                if isinstance(msg.get('content'), str):
+                    role = "User" if msg.get('type') == 'human' else "Assistant"
+                    conversation_history.append(f"{role}: {msg.get('content')}")
+            
+            conversation_context = "\n".join(conversation_history)
+            
+            # Get user profile context
+            user_profile_context = ""
+            if state.user_profile:
+                profile = state.user_profile
+                if profile.budget_range:
+                    user_profile_context += f"Budget: {profile.budget_range}\n"
+                if profile.health_conditions:
+                    user_profile_context += f"Health conditions: {', '.join(profile.health_conditions)}\n"
+                if profile.product_preferences:
+                    user_profile_context += f"Product preferences: {', '.join(profile.product_preferences)}\n"
+                if profile.activity_preferences:
+                    user_profile_context += f"Activity preferences: {', '.join(profile.activity_preferences)}\n"
+            
+            # Create the prompt
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are an expert e-commerce assistant that determines whether a user wants product bundles or individual products.
+
+BUNDLES are appropriate when:
+- User asks for a "complete solution", "everything I need", "full setup"
+- User mentions specific use cases like "camping trip", "workout routine", "sleep routine"
+- User has budget constraints and wants a comprehensive solution
+- User asks for "kits", "packages", "bundles", "complete sets"
+- User is a beginner asking for "everything to get started"
+- User wants products that work together (e.g., sleep supplements + sleep aids)
+
+INDIVIDUAL PRODUCTS are appropriate when:
+- User asks for specific products: "best melatonin", "protein powder", "vitamin D"
+- User asks "what", "which", "recommend" for a single product type
+- User wants to compare options within a category
+- User asks for "suggestions" or "recommendations" for one product type
+- User is looking for alternatives or specific features
+
+Consider the user's profile, conversation history, and current message to make an intelligent decision.
+
+Respond with JSON format: {"should_bundle": boolean, "reasoning": "explanation", "confidence": 0.0-1.0}"""),
+                ("human", """Conversation History:
+{conversation_context}
+
+User Profile:
+{user_profile_context}
+
+Current Message: "{current_message}"
+
+Based on this context, determine if the user wants product bundles or individual products.""")
+            ])
+            
+            # Use the injected LLM instance or create a new one with proper API key
+            if self.llm:
+                llm = self.llm
+            else:
+                # Fallback: try to get API key from environment
+                import os
+                api_key = os.getenv("OPENAI_API_KEY")
+                if not api_key:
+                    raise ValueError("OpenAI API key not found. Please set OPENAI_API_KEY environment variable.")
+                llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, api_key=api_key)
+            
+            parser = JsonOutputParser(pydantic_object=BundlingIntent)
+            
+            # Create the chain
+            chain = prompt | llm | parser
+            
+            # Get the result
+            result = await chain.ainvoke({
+                "conversation_context": conversation_context,
+                "user_profile_context": user_profile_context,
+                "current_message": message_content
+            })
+            
+            logger.info(f"LLM bundling analysis: {result}")
+            
+            # Return the decision with confidence threshold
+            return result.should_bundle if result.confidence > 0.6 else False
+            
+        except Exception as e:
+            logger.error(f"Error in LLM bundling analysis: {e}")
+            # Fallback: use simple heuristic based on message content
+            message_lower = message_content.lower()
+            bundle_indicators = ['complete', 'everything', 'all', 'kit', 'bundle', 'package', 'solution']
+            individual_indicators = ['specific', 'just', 'only', 'single', 'recommend', 'best']
+            
+            bundle_score = sum(1 for indicator in bundle_indicators if indicator in message_lower)
+            individual_score = sum(1 for indicator in individual_indicators if indicator in message_lower)
+            
+            logger.info(f"Fallback analysis: bundle_score={bundle_score}, individual_score={individual_score}")
+            return bundle_score > individual_score
 
     async def _is_order_query(self, message_content: str, session: ChatSession = None) -> bool:
         """Check if the message is order-related.

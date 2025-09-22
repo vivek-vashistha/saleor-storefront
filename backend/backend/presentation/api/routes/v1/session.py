@@ -165,7 +165,11 @@ async def add_message(
     logger.info(f"[SESSION_API] Message processing completed for session {session_id}")
 
     # Convert to response model with only new messages
-    return ChatMessageResponse.from_entity(updated_session, message_index)
+    response = ChatMessageResponse.from_entity(updated_session, message_index)
+    logger.info(f"[SESSION_API] Returning {len(response.messages)} messages")
+    for i, msg in enumerate(response.messages):
+        logger.info(f"[SESSION_API] Message {i}: type={msg.get('type')}, has_products={bool(msg.get('recommended_products'))}")
+    return response
 
 
 @router.delete("/users/{user_id}/memory", status_code=status.HTTP_204_NO_CONTENT)

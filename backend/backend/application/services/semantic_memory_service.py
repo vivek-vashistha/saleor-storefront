@@ -96,13 +96,13 @@ class SemanticMemoryService:
         self.store = InMemoryStore(
             index={
                 "dims": 1536,  # OpenAI embedding dimension
-                "embed": f"openai:{config.embedding_model}",
+                "embed": self.embeddings,
             }
         )
         
         # Create memory manager for extraction
         self.memory_manager = create_memory_manager(
-            f"openai:{config.llm_model}",
+            self.llm,
             schemas=[UserPreference, ProductInteraction, ConversationTheme],
             instructions="Extract user preferences, product interactions, and conversation themes from conversations about outdoor gear and equipment. Focus on information that would be useful for future product recommendations and personalized interactions.",
             enable_inserts=True,
@@ -111,7 +111,7 @@ class SemanticMemoryService:
         
         # Create memory store manager for storage operations
         self.store_manager = create_memory_store_manager(
-            f"openai:{config.llm_model}",
+            self.llm,
             schemas=[UserPreference, ProductInteraction, ConversationTheme],
             instructions="Extract and manage user preferences, product interactions, and conversation themes for outdoor gear recommendations. Focus on information that would be useful for future product recommendations and personalized interactions.",
             enable_inserts=True,

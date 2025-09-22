@@ -1,5 +1,5 @@
-query ProductListPaginated($first: Int!, $after: String, $channel: String!) {
-	products(first: $first, after: $after, channel: $channel) {
+query ProductListPaginated($first: Int!, $after: String, $channel: String!, $sortBy: ProductOrder) {
+    products(first: $first, after: $after, channel: $channel, sortBy: $sortBy) {
 		totalCount
 		edges {
 			node {

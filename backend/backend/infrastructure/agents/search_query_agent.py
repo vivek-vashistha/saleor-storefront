@@ -64,7 +64,7 @@ class SearchQueryAgent(IAgent[ChatState]):
             "Grocery",
         ]
 
-        # Build user context from profile
+        # Build user and order context from state
         user_context = ""
         if user_profile and user_profile.has_user_profile:
             user_context = f"""
@@ -83,6 +83,13 @@ IMPORTANT: Use this user profile information to enhance search queries. For exam
         else:
             logger.info("No user profile context available for search query generation")
 
+        order_context = ""
+        try:
+            if user_profile and getattr(user_profile, "last_order_summary", None):
+                order_context = f"\nORDER CONTEXT:\n{user_profile.last_order_summary}\n"
+        except Exception:
+            pass
+
         system_prompt = f"""You are a product search expert. Your task is to analyze a conversation
                             and extract multiple relevant search queries for finding the products (vitamins, supplements, sports nutrition, beauty, personal care, grocery).
 
@@ -99,6 +106,7 @@ IMPORTANT: Use this user profile information to enhance search queries. For exam
                             If a product doesn't clearly fit into one of these categories, match it to the closest category.
 
                             {user_context}
+                            {order_context}
 
                             CRITICAL: If the user has health conditions (like diabetes, sugar problems, etc.), 
                             make sure to include health-related search terms (e.g., sugar-free, low glycemic) and consider their specific needs when generating queries.

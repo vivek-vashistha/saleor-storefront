@@ -9,6 +9,9 @@ export const NavLinks = async ({ channel }: { channel: string }) => {
 		revalidate: 60 * 60 * 24,
 	});
 
+	// const items = navLinks.menu?.items ?? [];
+	// console.log("NavLinks items:", items);
+
 	return (
 		<>
 			<NavLink href="/products">All</NavLink>

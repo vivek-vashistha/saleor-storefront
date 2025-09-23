@@ -25,6 +25,8 @@ export default async function Page(props: {
 			first: ProductsPerPage,
 			after: cursor,
 			channel: params.channel,
+			// Use LAST_MODIFIED_AT for "latest updated"; switch to CREATED_AT for "latest created".
+			sortBy: { field: "LAST_MODIFIED_AT", direction: "DESC" },
 		},
 		revalidate: 60,
 	});

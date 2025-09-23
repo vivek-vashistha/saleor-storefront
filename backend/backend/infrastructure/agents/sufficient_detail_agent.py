@@ -32,7 +32,7 @@ class SufficientDetailAgent(IAgent[ChatState]):
         # Create a prompt for determining if the conversation has sufficient detail
         prompt = ChatPromptTemplate.from_messages(
             [
-                (
+                 (
                     "system",
                     """You are an expert at analyzing conversations about health, wellness, and consumer products.
                     Your task is to determine if a conversation contains sufficient detail to generate

@@ -1,0 +1,125 @@
+{
+    "info": {
+      "name": "REI Downloader + Mapping",
+      "_postman_id": "8e2f6b7d-0b3a-4fda-8c6d-8d6a3dc7ef00",
+      "description": "Downloads REI images, auto-resolves product pages to og:image, sets Referer, and builds mapping.json.",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "Resolve + Download",
+        "event": [
+          {
+            "listen": "prerequest",
+            "script": {
+              "exec": [
+                "// Input: {{url}} from data file",
+                "const inUrl = pm.iterationData.get('url') || pm.variables.get('url');",
+                "pm.variables.set('in_url', inUrl);",
+                "",
+                "function isProduct(u){ try { return new URL(u).pathname.includes('/product/'); } catch(e){ return false; } }",
+                "",
+                "pm.variables.set('resolved_url', inUrl);",
+                "pm.variables.set('referer', 'https://www.rei.com/');",
+                "",
+                "if (isProduct(inUrl)) {",
+                "  // Phase 1: hit the product page, stash HTML",
+                "  pm.sendRequest({",
+                "    url: inUrl, method: 'GET',",
+                "    header: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html,*/*;q=0.8' }",
+                "  }, function(err, res){",
+                "    if (err || !res) {",
+                "      pm.variables.set('resolved_url', inUrl);",
+                "      return;",
+                "    }",
+                "    const html = res.text();",
+                "    const m = html.match(/<meta[^>]+property=[\"']og:image[\"'][^>]+content=[\"']([^\"']+)[\"']/i) ||",
+                "              html.match(/<meta[^>]+property=[\"']og:image:secure_url[\"'][^>]+content=[\"']([^\"']+)[\"']/i);",
+                "    const og = m && m[1] ? m[1] : inUrl;",
+                "    pm.variables.set('resolved_url', og);",
+                "    pm.variables.set('referer', inUrl); // use exact product page as referer for best odds",
+                "  });",
+                "}"
+              ],
+              "type": "text/javascript"
+            }
+          },
+          {
+            "listen": "test",
+            "script": {
+              "exec": [
+                "// Accumulate mapping.json and expose a Visualizer download link",
+                "let raw = pm.collectionVariables.get('mapping_json');",
+                "let mapping = {};",
+                "if (raw) { try { mapping = JSON.parse(raw); } catch(e) { mapping = {}; } }",
+                "",
+                "const reqUrl = pm.variables.get('in_url');",
+                "",
+                "// determine extension",
+                "const ct = (pm.response.headers.get('Content-Type') || '').toLowerCase();",
+                "function inferExt(ct, url){",
+                "  if (ct.includes('png')) return 'png';",
+                "  if (ct.includes('jpeg') || ct.includes('jpg')) return 'jpg';",
+                "  if (ct.includes('webp')) return 'webp';",
+                "  if (ct.includes('gif')) return 'gif';",
+                "  if (ct.includes('svg')) return 'svg';",
+                "  try { const p = new URL(url).pathname.toLowerCase();",
+                "        if (p.endsWith('.png')) return 'png';",
+                "        if (p.endsWith('.jpg')||p.endsWith('.jpeg')) return 'jpg';",
+                "        if (p.endsWith('.webp')) return 'webp';",
+                "        if (p.endsWith('.gif')) return 'gif';",
+                "        if (p.endsWith('.svg')) return 'svg'; } catch(e) {}",
+                "  return 'jpg';",
+                "}",
+                "",
+                "function baseFrom(url){",
+                "  try {",
+                "    let b = new URL(url).pathname.split('/').filter(Boolean).slice(-1)[0] || 'image';",
+                "    b = b.split('?')[0];",
+                "    b = b.replace(/\\.(png|jpe?g|webp|gif|svg)$/i, '');",
+                "    return b;",
+                "  } catch(e){ return 'image'; }",
+                "}",
+                "",
+                "const finalUrl = pm.variables.get('resolved_url') || reqUrl;",
+                "const ext = inferExt(ct, finalUrl);",
+                "const fnameOverride = pm.iterationData.get('filename');",
+                "let fname = (fnameOverride && fnameOverride.trim()) || (baseFrom(finalUrl) + '.' + ext);",
+                "",
+                "mapping[reqUrl] = fname;",
+                "pm.collectionVariables.set('mapping_json', JSON.stringify(mapping, null, 2));",
+                "",
+                "const template = `<!doctype html><html><head><meta charset='utf-8'><title>mapping.json</title></head>",
+                "<body style='font-family:system-ui;padding:16px'>",
+                "<h2>mapping.json</h2>",
+                "<p><a id='dl' download='mapping.json'>Download mapping.json</a></p>",
+                "<pre>{{json}}</pre>",
+                "<script>const data={{json}};const blob=new Blob([data],{type:'application/json'});",
+                "const u=URL.createObjectURL(blob);document.getElementById('dl').href=u;</script>",
+                "</body></html>`;",
+                "pm.visualizer.set(template, { json: JSON.stringify(mapping, null, 2) });",
+                "",
+                "pm.test('Got image response', function(){",
+                "  pm.expect(pm.response.code).to.be.oneOf([200,206]);",
+                "  pm.expect(ct).to.not.include('text/html');",
+                "});"
+              ],
+              "type": "text/javascript"
+            }
+          }
+        ],
+        "request": {
+          "method": "GET",
+          "header": [
+            { "key": "Accept", "value": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8" },
+            { "key": "Referer", "value": "{{referer}}" },
+            { "key": "User-Agent", "value": "Mozilla/5.0" }
+          ],
+          "url": { "raw": "{{resolved_url}}", "host": [ "{{resolved_url}}" ] }
+        },
+        "response": []
+      }
+    ],
+    "variable": []
+  }
+  

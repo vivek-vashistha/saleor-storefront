@@ -113,6 +113,12 @@ Then, [install `pnpm`](https://pnpm.io/installation) and run the following comma
 pnpm i
 ```
 
+or
+
+```
+pnpm i --ignore-scripts
+```
+
 ## Payments
 
 Currently, Saleor Storefront supports payments via the [Saleor Adyen App](https://docs.saleor.io/docs/3.x/developer/app-store/apps/adyen). To install and configure the payment app go to the "Apps" section in the Saleor Dashboard (App Store is only available in Saleor Cloud).

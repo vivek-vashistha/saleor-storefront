@@ -23,8 +23,8 @@ class EnhancedUserProfile(UserProfile):
         default_factory=list,
         description="Recurring themes and topics from conversations"
     )
-    interaction_patterns: Dict[str, Any] = Field(
-        default_factory=dict,
+    interaction_patterns: Optional[Dict[str, str]] = Field(
+        default=None,
         description="Patterns in user interaction behavior"
     )
     product_affinities: List[str] = Field(
@@ -47,6 +47,8 @@ class EnhancedUserProfile(UserProfile):
             self.conversation_themes = list(set(self.conversation_themes))  # Remove duplicates
         
         if "patterns" in context:
+            if self.interaction_patterns is None:
+                self.interaction_patterns = {}
             self.interaction_patterns.update(context["patterns"])
         
         if "affinities" in context:

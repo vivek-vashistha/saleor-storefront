@@ -331,7 +331,7 @@ INDIVIDUAL PRODUCTS are appropriate when:
 
 Consider the user's profile, conversation history, and current message to make an intelligent decision.
 
-Respond with JSON format: {"should_bundle": boolean, "reasoning": "explanation", "confidence": 0.0-1.0}"""),
+Respond with JSON format: {{"should_bundle": boolean, "reasoning": "explanation", "confidence": 0.0-1.0}}"""),
                 ("human", """Conversation History:
 {conversation_context}
 
@@ -368,8 +368,16 @@ Based on this context, determine if the user wants product bundles or individual
             
             logger.info(f"LLM bundling analysis: {result}")
             
+            # Handle both dict and Pydantic model responses
+            if isinstance(result, dict):
+                should_bundle = result.get('should_bundle', False)
+                confidence = result.get('confidence', 0.0)
+            else:
+                should_bundle = result.should_bundle
+                confidence = result.confidence
+            
             # Return the decision with confidence threshold
-            return result.should_bundle if result.confidence > 0.6 else False
+            return should_bundle if confidence > 0.6 else False
             
         except Exception as e:
             logger.error(f"Error in LLM bundling analysis: {e}")

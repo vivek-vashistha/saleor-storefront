@@ -8,7 +8,7 @@ from langchain_openai import ChatOpenAI
 from backend.domain.entities.enhanced_chat import EnhancedChatState, MemoryComponents
 from backend.domain.enums import AgentType
 from backend.application.interfaces import IChatWorkflow
-from backend.infrastructure.agents.enhanced_user_profile_extraction_agent import EnhancedUserProfileExtractionAgent
+from backend.infrastructure.agents.optimized_user_profile_extraction_agent import OptimizedUserProfileExtractionAgent
 from backend.application.services.semantic_memory_service import SemanticMemoryService, SemanticMemoryConfig
 from backend.application.services.background_memory_manager import BackgroundMemoryManager
 
@@ -44,8 +44,8 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
         self.background_memory_manager = background_memory_manager
         self.agent_factory = agent_factory
         
-        # Initialize enhanced agents
-        self.enhanced_user_profile_extraction_agent = EnhancedUserProfileExtractionAgent(
+        # Initialize optimized agents
+        self.enhanced_user_profile_extraction_agent = OptimizedUserProfileExtractionAgent(
             llm=llm,
             semantic_memory_service=semantic_memory_service
         )
@@ -263,7 +263,7 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
         return builder.compile()
 
     async def call_enhanced_user_profile_extraction_agent(self, state: EnhancedChatState) -> EnhancedChatState:
-        """Call the enhanced user profile extraction agent with semantic memory.
+        """Call the optimized user profile extraction agent with unified extraction.
 
         Args:
             state: The current enhanced chat state
@@ -277,7 +277,7 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
                 logger.info(f"[ENHANCED_WORKFLOW] Skipping profile extraction for greeting message - user {state.user_id}")
                 return state
                 
-            logger.info(f"[ENHANCED_WORKFLOW] Starting user profile extraction for user {state.user_id}")
+            logger.info(f"[ENHANCED_WORKFLOW] Starting optimized user profile extraction for user {state.user_id}")
             # Initialize memory components if not already done
             if not state.memory_components and state.user_id:
                 memory_components = await self.semantic_memory_service.initialize_user_memory(state.user_id)
@@ -288,10 +288,10 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
                 state.set_memory_components(memory_components_obj)
                 logger.info(f"[ENHANCED_WORKFLOW] Initialized memory components for user {state.user_id}")
 
-            # Process with enhanced agent
-            logger.debug(f"[ENHANCED_WORKFLOW] Processing user profile extraction with enhanced agent")
+            # Process with optimized agent (single LLM call for both profile and semantic context)
+            logger.debug(f"[ENHANCED_WORKFLOW] Processing unified profile and semantic context extraction")
             updated_state = await self.enhanced_user_profile_extraction_agent.process(state)
-            logger.info(f"[ENHANCED_WORKFLOW] User profile extraction completed for user {state.user_id}")
+            logger.info(f"[ENHANCED_WORKFLOW] Optimized user profile extraction completed for user {state.user_id}")
             
             # Schedule memory consolidation in background (non-blocking)
             if updated_state.memory_consolidation_pending and updated_state.user_id:

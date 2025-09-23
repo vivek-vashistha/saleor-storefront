@@ -29,7 +29,7 @@ class MongoDBConnection(IMongoDBConnection):
         self.database = self.client[self.config.database]
 
     @asynccontextmanager
-    async def get_connection(self) -> AsyncGenerator[AsyncIOMotorDatabase[Mapping[str, Any] | Any], None]:
+    async def get_connection(self) -> AsyncGenerator[AsyncIOMotorDatabase, None]:
         """A context manager for managing database connections.
 
         Yields:
@@ -43,7 +43,7 @@ class MongoDBConnection(IMongoDBConnection):
 
     async def execute_db_operation(
         self,
-        operation: Callable[[AsyncIOMotorDatabase[Mapping[str, Any]]], Any],
+        operation: Callable[[AsyncIOMotorDatabase], Any],
         error_message: str = "MongoDB operation error",
     ) -> Any:
         """Execute a MongoDB operation and handle any errors.

@@ -13,7 +13,7 @@ class SaleorConfig(BaseSettings):
     """
 
     host: str = Field(default="localhost", description="Saleor API server host")
-    port: int = Field(default=8002, description="Saleor API server port")
+    port: int = Field(default=8000, description="Saleor API server port")
     timeout: int = Field(default=30, description="Request timeout in seconds")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -21,4 +21,4 @@ class SaleorConfig(BaseSettings):
     @property
     def base_url(self) -> str:
         """Get the complete base URL for the Saleor API."""
-        return f"http://{self.host}:{self.port}"
+        return f"http://localhost:8000/v1/saleor"

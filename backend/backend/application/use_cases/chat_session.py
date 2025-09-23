@@ -245,7 +245,7 @@ class ProcessChatMessageUseCase:
                     )
 
                     if products:
-                        logger.info(f"Retrieved {len(products)} individual products")
+                        logger.info(f"\n\nRetrieved {len(products)} individual products \n\n {products}")
                         session.add_ai_message_with_products(products)
                     else:
                         logger.warning("No products retrieved for single query")
@@ -353,7 +353,7 @@ class ProcessChatMessageUseCase:
 
                     Consider the user's profile, conversation history, and current message to make an intelligent decision.
 
-                    Respond with JSON format: {"should_bundle": boolean, "reasoning": "explanation", "confidence": 0.0-1.0}"""),
+                    Respond with JSON format: {{"should_bundle": boolean, "reasoning": "explanation", "confidence": 0.0-1.0}}"""),
                                     ("human", """Conversation History:
                     {conversation_context}
 
@@ -390,8 +390,17 @@ class ProcessChatMessageUseCase:
             
             logger.info(f"LLM bundling analysis: {result}")
             
+            # Support both dict and Pydantic object outputs
+            if isinstance(result, dict):
+                should_bundle_val = bool(result.get("should_bundle", False))
+                confidence_val = float(result.get("confidence", 0.0) or 0.0)
+            else:
+                # Pydantic/attr object
+                should_bundle_val = bool(getattr(result, "should_bundle", False))
+                confidence_val = float(getattr(result, "confidence", 0.0) or 0.0)
+
             # Return the decision with confidence threshold
-            return result.should_bundle if result.confidence > 0.6 else False
+            return should_bundle_val if confidence_val > 0.6 else False
             
         except Exception as e:
             logger.error(f"Error in LLM bundling analysis: {e}")
@@ -554,7 +563,7 @@ class ProcessChatMessageUseCase:
                 # Cache raw response and email for reuse within the session
                 session.state.order_api_cache = {"email": user_email, "raw_response": order_response}
             
-            logger.info(f"Order API response received: {order_response}")
+            # logger.info(f"Order API response received: {order_response}")
             
             # Extract the final answer
             final_answer = self._extract_final_answer(order_response)

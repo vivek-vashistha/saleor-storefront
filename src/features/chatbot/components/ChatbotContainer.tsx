@@ -8,7 +8,7 @@ import { useChatSession } from "../hooks/useChatSession";
 import { ChatInput } from "./ChatInput";
 import ChatMessages from "./ChatMessages";
 import { MemoizedProductPanel } from "./ProductPanel";
-import UserDisplay from "./UserDisplay";
+import { UserDisplay } from "./UserDisplay";
 import { cn } from "@/lib/utils";
 import { useChatControls } from "@/context/ChatControlsContext";
 import { Button } from "@/components/ui/button";

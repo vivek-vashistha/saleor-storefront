@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect, useRef } from "react";
 import { type Message, type Product, type ProductBundle } from "@/features/chatbot/types";
 import { initializeSession, deleteSession, sendMessage } from "@/features/chatbot/api";
 import { useUser } from "@/context/UserContext";
@@ -11,6 +11,8 @@ interface UseChatSessionProps {
 export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps = {}) => {
 	const { user } = useUser();
 	const [conversationId, setConversationId] = useState<string | null>(null);
+	const hasPersonalizedMessage = useRef(false);
+
 	const [messages, setMessages] = useState<Message[]>([
 		{
 			type: "bot",
@@ -19,6 +21,22 @@ export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps 
 			timestamp: new Date().toISOString(),
 		},
 	]);
+
+	// Update the initial message when user data becomes available
+	useEffect(() => {
+		if (user?.name && !hasPersonalizedMessage.current) {
+			const personalizedMessage = `Hi ${user.name}! I'm your product advisor. Tell me about your health goals, concerns, or the vitamins, supplements, sports nutrition, beauty or grocery items you're looking for, and I'll recommend the best options.`;
+
+			setMessages([
+				{
+					type: "bot",
+					content: personalizedMessage,
+					timestamp: new Date().toISOString(),
+				},
+			]);
+			hasPersonalizedMessage.current = true;
+		}
+	}, [user?.name]);
 	const [isLoading, setIsLoading] = useState(false);
 	const [bundles, setBundles] = useState<ProductBundle[]>([]);
 	const [recommendedProducts, setRecommendedProducts] = useState<Product[]>([]);

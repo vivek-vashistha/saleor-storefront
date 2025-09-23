@@ -37,31 +37,39 @@ class SearchQueryAgent(IAgent[ChatState]):
         """
         # Predefined list of allowed categories
         allowed_categories = [
-            "Gut Health",
-            "Probiotics",
-            "Children's Health",
+            "Sports Nutrition",
             "Amino Acids",
             "Creatine",
-            "Sleep",
-            "Brain & Cognitive",
-            "Magnesium",
-            "Coenzyme Q10 (Ubiquinone)",
+            "Supplements & Wellness",
             "Vitamin B12 (Cobalamin)",
             "Vitamin B",
+            "Vitamins",
             "Adaptogens",
             "Weight Management",
+            "Probiotics & Digestive",
+            "Gut Health",
+            "Children's Health",
+            "Childrens Health",
+            "Probiotics",
+            "Sleep",
+            "Brain & Cognitive",
+            "Brain Cognitive",
+            "Minerals",
+            "Bone, Joint & Cartilage",
+            "Bone, Joint and Cartilage",
+            "Magnesium",
+            "Antioxidants",
+            "Coenzyme Q10 (Ubiquinone)",
             "Grocery",
+            "Grocery & Pantry",
             "Baking, Flour & Mixes",
+            "Baking Flour Mixes",
+            "Sweeteners",
             "Body Butter",
             "Medicine Cabinet",
-            "Bone, Joint & Cartilage",
             "Hair, Skin & Nails",
-            "Vitamins",
-            "Supplements",
-            "Sports Nutrition",
             "Beauty",
             "Personal Care",
-            "Grocery",
         ]
 
         # Build user and order context from state
@@ -69,16 +77,16 @@ class SearchQueryAgent(IAgent[ChatState]):
         if user_profile and user_profile.has_user_profile:
             user_context = f"""
             
-USER PROFILE CONTEXT:
-{user_profile.user_profile.get_relevant_context('general')}
+                USER PROFILE CONTEXT:
+                {user_profile.user_profile.get_relevant_context('general')}
 
-IMPORTANT: Use this user profile information to enhance search queries. For example:
-- If they have health conditions (like diabetes), include health-related search terms
-- If they have dietary restrictions, consider food-related gear needs
-- If they have specific activity preferences, focus on those activities
-- If they have budget constraints, consider price-related terms
-- If they have experience level, tailor search terms to their expertise
-"""
+                IMPORTANT: Use this user profile information to enhance search queries. For example:
+                - If they have health conditions (like diabetes), include health-related search terms
+                - If they have dietary restrictions, consider food-related gear needs
+                - If they have specific activity preferences, focus on those activities
+                - If they have budget constraints, consider price-related terms
+                - If they have experience level, tailor search terms to their expertise
+                """
             logger.info(f"Using user profile context: {user_profile.user_profile.get_relevant_context('general')}")
         else:
             logger.info("No user profile context available for search query generation")

@@ -336,34 +336,34 @@ class ProcessChatMessageUseCase:
             prompt = ChatPromptTemplate.from_messages([
                 ("system", """You are an expert e-commerce assistant that determines whether a user wants product bundles or individual products.
 
-BUNDLES are appropriate when:
-- User asks for a "complete solution", "everything I need", "full setup"
-- User mentions specific use cases like "camping trip", "workout routine", "sleep routine"
-- User has budget constraints and wants a comprehensive solution
-- User asks for "kits", "packages", "bundles", "complete sets"
-- User is a beginner asking for "everything to get started"
-- User wants products that work together (e.g., sleep supplements + sleep aids)
+                    BUNDLES are appropriate when:
+                    - User asks for a "complete solution", "everything I need", "full setup"
+                    - User mentions specific use cases like "camping trip", "workout routine", "sleep routine"
+                    - User has budget constraints and wants a comprehensive solution
+                    - User asks for "kits", "packages", "bundles", "complete sets"
+                    - User is a beginner asking for "everything to get started"
+                    - User wants products that work together (e.g., sleep supplements + sleep aids)
 
-INDIVIDUAL PRODUCTS are appropriate when:
-- User asks for specific products: "best melatonin", "protein powder", "vitamin D"
-- User asks "what", "which", "recommend" for a single product type
-- User wants to compare options within a category
-- User asks for "suggestions" or "recommendations" for one product type
-- User is looking for alternatives or specific features
+                    INDIVIDUAL PRODUCTS are appropriate when:
+                    - User asks for specific products: "best melatonin", "protein powder", "vitamin D"
+                    - User asks "what", "which", "recommend" for a single product type
+                    - User wants to compare options within a category
+                    - User asks for "suggestions" or "recommendations" for one product type
+                    - User is looking for alternatives or specific features
 
-Consider the user's profile, conversation history, and current message to make an intelligent decision.
+                    Consider the user's profile, conversation history, and current message to make an intelligent decision.
 
-Respond with JSON format: {"should_bundle": boolean, "reasoning": "explanation", "confidence": 0.0-1.0}"""),
-                ("human", """Conversation History:
-{conversation_context}
+                    Respond with JSON format: {"should_bundle": boolean, "reasoning": "explanation", "confidence": 0.0-1.0}"""),
+                                    ("human", """Conversation History:
+                    {conversation_context}
 
-User Profile:
-{user_profile_context}
+                    User Profile:
+                    {user_profile_context}
 
-Current Message: "{current_message}"
+                    Current Message: "{current_message}"
 
-Based on this context, determine if the user wants product bundles or individual products.""")
-            ])
+                    Based on this context, determine if the user wants product bundles or individual products.""")
+                            ])
             
             # Use the injected LLM instance or create a new one with proper API key
             if self.llm:

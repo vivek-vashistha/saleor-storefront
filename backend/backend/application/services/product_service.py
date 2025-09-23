@@ -1,6 +1,9 @@
 import asyncio
 import logging
 from collections import defaultdict
+from typing import List, Optional
+import os
+import json
 
 from backend.domain.entities import Product, ProductBundle, SearchQuery
 from backend.infrastructure.repositories import IProductRepository
@@ -22,6 +25,79 @@ class ProductService:
         self.product_repository = product_repository
         self.saleor_service = saleor_service
         self.llm = llm
+
+    @staticmethod
+    def _load_extra_system_prompt() -> Optional[str]:
+        """Load extra system prompt instructions from JSON or raw text to read brand prefs.
+
+        Order of precedence:
+        1) Path from env var SYSTEM_PROMPT_JSON_PATH
+        2) system_prompt_extra.json relative to this file and upwards to repo root
+        Returns text or None.
+        """
+        candidates: List[str] = []
+        env_path = os.getenv("SYSTEM_PROMPT_JSON_PATH")
+        if env_path:
+            candidates.append(env_path)
+
+        here = os.path.dirname(__file__)
+        candidates.append(os.path.join(here, "system_prompt_extra.json"))
+        candidates.append(os.path.join(os.path.dirname(here), "system_prompt_extra.json"))
+        candidates.append(os.path.join(os.path.dirname(os.path.dirname(here)), "system_prompt_extra.json"))
+        candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(here))), "system_prompt_extra.json"))
+
+        for path in candidates:
+            try:
+                if not os.path.exists(path):
+                    continue
+                with open(path, "r", encoding="utf-8") as f:
+                    raw = f.read()
+                if raw and raw.strip():
+                    return raw.strip()
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _extract_preferred_brands(raw_text: Optional[str]) -> list[str]:
+        if not raw_text:
+            return []
+        try:
+            data = json.loads(raw_text)
+            prefs = data.get("preferences", {}) if isinstance(data, dict) else {}
+            brands = prefs.get("preferred_brands") or []
+            return [str(b).strip() for b in brands if str(b).strip()]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _strip_brands_and_modifiers(base_query: str, brands: list[str]) -> str:
+        q = (base_query or "").strip()
+        for b in brands:
+            if not b:
+                continue
+            q = q.replace(b, " ")
+        # Remove common soft modifiers to broaden search
+        for token in ["budget-friendly", "budget friendly", "cheap", "affordable"]:
+            q = q.replace(token, " ")
+        # Collapse whitespace
+        q = " ".join(q.split())
+        return q
+
+    @staticmethod
+    def _filter_by_brands(products: list["Product"], brands: list[str]) -> list["Product"]:
+        if not products or not brands:
+            return products
+        lowered = [b.lower() for b in brands]
+        filtered: list[Product] = []
+        for p in products:
+            name = (p.name or "").lower()
+            desc = (p.description or "").lower()
+            crumbs = ", ".join(p.breadcrumbs or []).lower() if hasattr(p, "breadcrumbs") and p.breadcrumbs else ""
+            haystack = " | ".join([name, desc, crumbs])
+            if any(b in haystack for b in lowered):
+                filtered.append(p)
+        return filtered
 
     async def get_products_by_ids(self, product_ids: list[int]) -> list[Product]:
         """Get products by their IDs.
@@ -75,6 +151,48 @@ class ProductService:
             )
             
             logger.info(f"Retrieved {len(products)} products for query: '{search_query.query}'")
+
+            # If no results, relax categories and retry
+            if not products:
+                try:
+                    logger.info("No products found on initial query; retrying without category filters")
+                    products = await self.product_repository.get_products_by_query(
+                        query=search_query.query,
+                        categories=None,
+                        num_results=max(10, max_num_results * 3),
+                    )
+                    logger.info(f"Retrieved {len(products)} products without categories")
+                except Exception as e:
+                    logger.warning(f"Retry without categories failed: {e}")
+
+            # If still no results, strip brands/modifiers and try targeted category for B12
+            extra = self._load_extra_system_prompt()
+            preferred_brands = self._extract_preferred_brands(extra)
+            if not products:
+                broadened_query = self._strip_brands_and_modifiers(search_query.query, preferred_brands)
+                if broadened_query and broadened_query != search_query.query:
+                    try:
+                        logger.info(f"Retrying with broadened query: '{broadened_query}' and category hint for Vitamin B12")
+                        products = await self.product_repository.get_products_by_query(
+                            query=broadened_query,
+                            categories=["Vitamin B12 (Cobalamin)"],
+                            num_results=max(10, max_num_results * 3),
+                        )
+                        logger.info(f"Retrieved {len(products)} products with broadened query + B12 category")
+                    except Exception as e:
+                        logger.warning(f"Retry with broadened query + category failed: {e}")
+                # Final fallback: broadened query without categories
+                if not products and broadened_query:
+                    try:
+                        logger.info("Final fallback: broadened query without categories")
+                        products = await self.product_repository.get_products_by_query(
+                            query=broadened_query,
+                            categories=None,
+                            num_results=max(10, max_num_results * 3),
+                        )
+                        logger.info(f"Retrieved {len(products)} products on final fallback")
+                    except Exception as e:
+                        logger.warning(f"Final fallback failed: {e}")
             
             # Remove duplicates based on product_id
             unique_products = []
@@ -88,6 +206,56 @@ class ProductService:
                     logger.info(f"Removed duplicate product '{product.name}' (ID: {product.product_id})")
             
             logger.info(f"After deduplication: {len(unique_products)} unique products")
+
+            # Enforce preferred brand filtering with retry strategy
+            if preferred_brands:
+                brand_matched = self._filter_by_brands(unique_products, preferred_brands)
+                if not brand_matched:
+                    logger.info(
+                        f"No products matched preferred brands {preferred_brands}; retrying search with brand hints"
+                    )
+                    # Retry with brand included in the query, increase result window
+                    retries = 2
+                    aggregate: list[Product] = []
+                    for i in range(retries):
+                        for brand in preferred_brands:
+                            brand_query = f"{brand} {search_query.query}".strip()
+                            try:
+                                # Try without category constraints first, then with
+                                retry_products = await self.product_repository.get_products_by_query(
+                                    query=brand_query,
+                                    categories=None,
+                                    num_results=max(10, max_num_results * 3),
+                                )
+                                if not retry_products and search_query.categories:
+                                    retry_products = await self.product_repository.get_products_by_query(
+                                        query=brand_query,
+                                        categories=search_query.categories,
+                                        num_results=max(10, max_num_results * 3),
+                                    )
+                                aggregate.extend(retry_products)
+                            except Exception as e:
+                                logger.warning(f"Retry {i+1} with brand '{brand}' failed: {e}")
+                                continue
+                    # Deduplicate and filter again
+                    dedup: list[Product] = []
+                    seen_ids = set(p.product_id for p in unique_products)
+                    for p in aggregate:
+                        if p.product_id not in seen_ids:
+                            dedup.append(p)
+                            seen_ids.add(p.product_id)
+                    brand_matched = self._filter_by_brands(dedup, preferred_brands)
+                # If we found any brand-matched products, restrict to them
+                if brand_matched:
+                    unique_products = brand_matched
+                    logger.info(f"Brand filtering applied: {len(unique_products)} products match {preferred_brands}")
+                else:
+                    strict = (os.getenv("STRICT_BRAND_FILTER", "0").strip().lower() in {"1", "true", "yes"})
+                    if strict:
+                        logger.info("Brand filtering strict mode: no matches after retries; returning zero products")
+                        unique_products = []
+                    else:
+                        logger.info("Brand filtering lenient mode: no matches after retries; returning original non-brand results")
             
             # Log detailed product information
             for i, product in enumerate(unique_products):

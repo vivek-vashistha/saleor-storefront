@@ -9,6 +9,21 @@ interface UseChatSessionProps {
 }
 
 export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps = {}) => {
+
+	// const { user } = useUser();
+	// const [conversationId, setConversationId] = useState<string | null>(null);
+	// const [messages, setMessages] = useState<Message[]>([{
+	//   type: 'bot',
+	//   content: "Hi there! I'm your product advisor. Tell me about your health goals, concerns, or the vitamins, supplements, sports nutrition, beauty or grocery items you’re looking for, and I’ll recommend the best options.",
+	//   timestamp: new Date().toISOString(),
+	// }]);
+	// const [isLoading, setIsLoading] = useState(false);
+	// const [bundles, setBundles] = useState<ProductBundle[]>([]);
+	// const [recommendedProducts, setRecommendedProducts] = useState<Product[]>([]);
+	// const [messageType, setMessageType] = useState<'product_bundle_recommendation' | 'product_recommendation'>('product_bundle_recommendation');
+	// const [productMessageTimestamp, setProductMessageTimestamp] = useState<string | null>(null);
+	// const [userHasSentMessage, setUserHasSentMessage] = useState(false);
+
 	const { user } = useUser();
 	const [conversationId, setConversationId] = useState<string | null>(null);
 	const hasPersonalizedMessage = useRef(false);

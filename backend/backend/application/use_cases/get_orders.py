@@ -81,7 +81,8 @@ class GetOrdersUseCase:
             
             # Try external API first
             try:
-                url = backend_url or os.getenv("ORDER_GRAPH_API_URL", "http://localhost:8002/orders")
+                url = backend_url or os.getenv("ORDER_GRAPH_API_URL", "http://localhost:8000/v1/saleor/orders")
+                timeout_seconds = float(os.getenv("ORDER_GRAPH_TIMEOUT", "60"))
                 logger.info(f"Attempting to call external API: {url}")
                 
                 # Prepare form data
@@ -108,7 +109,7 @@ class GetOrdersUseCase:
                     data["kg_response"] = json.dumps([f"Available order data: {len(orders_data)} orders found"])
                 
                 # Make the request
-                response = requests.post(url, data=data, timeout=30)
+                response = requests.post(url, data=data, timeout=timeout_seconds)
                 response.raise_for_status()
                 result = response.json()
                 logger.info(f"External API response received: {result}")

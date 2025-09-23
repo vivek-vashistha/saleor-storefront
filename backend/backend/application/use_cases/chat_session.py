@@ -198,6 +198,25 @@ class ProcessChatMessageUseCase:
             logger.info(f"[PROCESS_CHAT] Using workflow: {workflow_name}")
             session.state = await self.workflow.run(session.state)
             logger.info(f"[PROCESS_CHAT] Workflow {workflow_name} completed")
+            
+            # Log the state after LangGraph processing
+            logger.info(f"[PROCESS_CHAT] State after LangGraph processing:")
+            logger.info(f"[PROCESS_CHAT] - Total messages: {len(session.state.messages)}")
+            logger.info(f"[PROCESS_CHAT] - Search queries: {len(session.state.search_queries)}")
+            logger.info(f"[PROCESS_CHAT] - Is detail sufficient: {session.state.is_detail_sufficient}")
+            logger.info(f"[PROCESS_CHAT] - Is conversation saturated: {session.state.is_conversation_saturated}")
+            
+            # Log the last few messages to see what LangGraph generated
+            if session.state.messages:
+                logger.info(f"[PROCESS_CHAT] Last 3 messages from LangGraph:")
+                for i, msg in enumerate(session.state.messages[-3:]):
+                    msg_type = msg.get('type', 'unknown')
+                    content = msg.get('content', '')
+                    if isinstance(content, list):
+                        content_str = ' '.join(str(item) for item in content)
+                    else:
+                        content_str = str(content)
+                    logger.info(f"[PROCESS_CHAT] Message {i}: type='{msg_type}', content='{content_str[:100]}...'")
 
             # Get products based on user intent, not just number of queries
             if session.state.has_search_query:

@@ -4,26 +4,18 @@ import React, { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { X as CloseIcon, Maximize2 as OpenIcon, Minimize2 as CloseFullscreenIcon } from "lucide-react";
 
-import { useChatSession } from "../hooks/useChatSession";
-import { ChatbotContainerWebSocket } from "./ChatbotContainerWebSocket";
-import { ChatbotContainerWebSocketDebug } from "./ChatbotContainerWebSocketDebug";
+import { useChatSessionWebSocketDebug } from "../hooks/useChatSessionWebSocketDebug";
 import { ChatInput } from "./ChatInput";
 import ChatMessages from "./ChatMessages";
 import { MemoizedProductPanel } from "./ProductPanel";
 import { UserDisplay } from "./UserDisplay";
+import { WebSocketStatus } from "./WebSocketStatus";
+import { StreamingMessage } from "./StreamingMessage";
 import { cn } from "@/lib/utils";
 import { useChatControls } from "@/context/ChatControlsContext";
 import { Button } from "@/components/ui/button";
 
-// Feature flag to enable WebSocket support
-const ENABLE_WEBSOCKET = process.env.NEXT_PUBLIC_ENABLE_WEBSOCKET === "true";
-
-export const ChatbotContainer: React.FC = () => {
-	// Use WebSocket version if enabled
-	if (ENABLE_WEBSOCKET) {
-		return <ChatbotContainerWebSocketDebug />;
-	}
-
+export const ChatbotContainerWebSocketDebug: React.FC = () => {
 	const { isOpen, isMaximized, toggleChatSize, openChat, closeChat } = useChatControls();
 	const [isAnimating, setIsAnimating] = useState(false);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -41,7 +33,16 @@ export const ChatbotContainer: React.FC = () => {
 		initializeSession,
 		deleteSessionIfUnused,
 		productSuggestions,
-	} = useChatSession({
+		// WebSocket specific
+		isWebSocketConnected,
+		currentThinking,
+		toolCalls,
+		streamingMessage,
+		isStreaming,
+		connectionError,
+		reconnect,
+		debugLog,
+	} = useChatSessionWebSocketDebug({
 		onMaximize: () => {
 			if (!isMaximized) {
 				setIsAnimating(true);
@@ -60,7 +61,7 @@ export const ChatbotContainer: React.FC = () => {
 
 	// scroll to bottom
 	const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-	useEffect(scrollToBottom, [messages]);
+	useEffect(scrollToBottom, [messages, streamingMessage]);
 
 	// manage session lifecycle
 	useEffect(() => {
@@ -78,11 +79,34 @@ export const ChatbotContainer: React.FC = () => {
 
 	const handleToggleChatSize = () => {
 		setIsAnimating(true);
+		toggleChatSize();
 		setTimeout(() => {
-			toggleChatSize();
-			setTimeout(() => setIsAnimating(false), 850);
-		}, 150);
+			setIsAnimating(false);
+		}, 850);
 	};
+
+	const handleCloseChat = () => {
+		setIsAnimating(true);
+		closeChat();
+		setTimeout(() => {
+			setIsAnimating(false);
+		}, 300);
+	};
+
+	// Enhanced messages with streaming support
+	const enhancedMessages = [...messages];
+	if (streamingMessage && isStreaming) {
+		enhancedMessages.push({
+			type: "bot",
+			content: streamingMessage,
+			timestamp: new Date().toISOString(),
+			isStreaming: true,
+		});
+	}
+
+	// Implement sliding window for performance (only show last 50 messages)
+	const MESSAGE_WINDOW_SIZE = 50;
+	const visibleMessages = enhancedMessages.slice(-MESSAGE_WINDOW_SIZE);
 
 	return (
 		<>
@@ -95,7 +119,6 @@ export const ChatbotContainer: React.FC = () => {
 				)}
 				<Button
 					onClick={isOpen ? closeChat : openChat}
-					// className={`rounded-full flex items-center justify-center text-white shadow-lg w-14 h-14 ${
 					className={`flex items-center justify-center rounded-full text-white shadow-lg ${
 						isOpen ? "h-12 w-12" : "h-16 w-16"
 					} ${
@@ -176,6 +199,19 @@ export const ChatbotContainer: React.FC = () => {
 													<CloseFullscreenIcon className="h-5 w-5" />
 												</Button>
 											</div>
+											{/* WebSocket Status in maximized view */}
+											<div className="flex items-center space-x-2">
+												<span className="font-sans text-sm font-medium text-[#020617]">
+													I-HERB SUPPLEMENTS ADVISOR
+												</span>
+												<WebSocketStatus
+													isConnected={isWebSocketConnected}
+													currentThinking={currentThinking}
+													toolCalls={toolCalls}
+													connectionError={connectionError}
+													onReconnect={reconnect}
+												/>
+											</div>
 										</div>
 										<UserDisplay />
 									</div>
@@ -202,9 +238,18 @@ export const ChatbotContainer: React.FC = () => {
 													<OpenIcon className="h-5 w-5" />
 												</Button>
 											</div>
-											<h6 id="chatbot-title" className="font-sans text-lg font-semibold text-[#020617]">
-												I-HERB SUPPLEMENTS ADVISOR
-											</h6>
+											<div className="flex items-center space-x-2">
+												<h6 id="chatbot-title" className="font-sans text-lg font-semibold text-[#020617]">
+													I-HERB SUPPLEMENTS ADVISOR
+												</h6>
+												<WebSocketStatus
+													isConnected={isWebSocketConnected}
+													currentThinking={currentThinking}
+													toolCalls={toolCalls}
+													connectionError={connectionError}
+													onReconnect={reconnect}
+												/>
+											</div>
 										</header>
 										<UserDisplay />
 									</div>
@@ -212,7 +257,7 @@ export const ChatbotContainer: React.FC = () => {
 
 								{/* messages scroll */}
 								<ChatMessages
-									messages={messages}
+									messages={visibleMessages}
 									isLoading={isLoading}
 									productMessageTimestamp={productMessageTimestamp}
 									messagesEndRef={messagesEndRef as React.RefObject<HTMLDivElement>}

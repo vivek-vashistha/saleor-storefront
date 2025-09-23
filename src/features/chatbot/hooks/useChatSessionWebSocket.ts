@@ -92,17 +92,30 @@ export const useChatSessionWebSocket = ({ onMaximize, isMaximized }: UseChatSess
 
 				case "message_chunk":
 					if (message.is_final) {
-						// Final chunk - create the complete message
-						const completeContent = streamingMessage + message.chunk;
+						// Final chunk - handle both string and array content
 						const currentTimestamp = new Date().toISOString();
 
-						const botMessage: Message = {
-							type: "bot",
-							content: completeContent,
-							timestamp: currentTimestamp,
-						};
+						if (Array.isArray(message.chunk)) {
+							// Create separate messages for each chunk item
+							message.chunk.forEach((chunkItem, index) => {
+								const botMessage: Message = {
+									type: "bot",
+									content: chunkItem,
+									timestamp: new Date(Date.now() + index * 100).toISOString(), // Slight delay between messages
+								};
+								setMessages((prev) => [...prev, botMessage]);
+							});
+						} else {
+							// Single string chunk - create one message
+							const completeContent = streamingMessage + message.chunk;
+							const botMessage: Message = {
+								type: "bot",
+								content: completeContent,
+								timestamp: currentTimestamp,
+							};
+							setMessages((prev) => [...prev, botMessage]);
+						}
 
-						setMessages((prev) => [...prev, botMessage]);
 						setStreamingMessage("");
 						setIsStreaming(false);
 						setCurrentThinking(null);

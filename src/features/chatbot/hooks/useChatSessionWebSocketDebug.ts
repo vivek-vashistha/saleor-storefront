@@ -104,26 +104,37 @@ export const useChatSessionWebSocketDebug = ({
 
 				case "message_chunk":
 					if (message.is_final) {
-						// Final chunk - create the complete message
-						const completeContent = streamingMessage + message.chunk;
+						// Final chunk - handle both string and array content
 						const currentTimestamp = new Date().toISOString();
 
-						const botMessage: Message = {
-							type: "bot",
-							content: completeContent,
-							timestamp: currentTimestamp,
-						};
+						if (Array.isArray(message.chunk)) {
+							// Create separate messages for each chunk item
+							message.chunk.forEach((chunkItem, index) => {
+								const botMessage: Message = {
+									type: "bot",
+									content: chunkItem,
+									timestamp: new Date(Date.now() + index * 100).toISOString(), // Slight delay between messages
+								};
+								setMessages((prev) => [...prev, botMessage]);
+								console.log(`🔔 Final message content ${index + 1}:`, chunkItem);
+							});
+						} else {
+							// Single string chunk - create one message
+							const completeContent = streamingMessage + message.chunk;
+							const botMessage: Message = {
+								type: "bot",
+								content: completeContent,
+								timestamp: currentTimestamp,
+							};
+							setMessages((prev) => [...prev, botMessage]);
+							console.log("🔔 Final message content:", completeContent);
+						}
 
-						setMessages((prev) => [...prev, botMessage]);
 						setStreamingMessage("");
 						setIsStreaming(false);
 						setCurrentThinking(null);
 						setToolCalls([]);
 						setIsLoading(false); // Stop loading when message is complete
-
-						// Check if the message contains product information
-						// This is a fallback for when products are embedded in the message content
-						console.log("🔔 Final message content:", completeContent);
 					} else {
 						// Intermediate chunk - accumulate
 						setStreamingMessage((prev) => prev + message.chunk);

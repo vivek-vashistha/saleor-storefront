@@ -63,20 +63,26 @@ export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps 
 				const currentTimestamp = new Date().toISOString();
 
 				if (message.type === "ai") {
-					// Concatenate all content items if it's an array
-					let messageContent: string;
+					// Handle both single content and array of content
 					if (Array.isArray(message.content)) {
-						messageContent = message.content.join("\n");
+						// Create separate messages for each content item
+						message.content.forEach((contentItem, index) => {
+							const botMessage: Message = {
+								type: "bot",
+								content: contentItem,
+								timestamp: new Date(Date.now() + index * 100).toISOString(), // Slight delay between messages
+							};
+							setMessages((prev) => [...prev, botMessage]);
+						});
 					} else {
-						messageContent = message.content;
+						// Single content item
+						const botMessage: Message = {
+							type: "bot",
+							content: message.content,
+							timestamp: currentTimestamp,
+						};
+						setMessages((prev) => [...prev, botMessage]);
 					}
-
-					const botMessage: Message = {
-						type: "bot",
-						content: messageContent,
-						timestamp: currentTimestamp,
-					};
-					setMessages((prev) => [...prev, botMessage]);
 				}
 
 				if (

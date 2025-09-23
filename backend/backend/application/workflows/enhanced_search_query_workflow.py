@@ -272,6 +272,11 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
             The updated enhanced chat state
         """
         try:
+            # Skip profile extraction for greetings to improve performance
+            if state.is_greeting:
+                logger.info(f"[ENHANCED_WORKFLOW] Skipping profile extraction for greeting message - user {state.user_id}")
+                return state
+                
             logger.info(f"[ENHANCED_WORKFLOW] Starting user profile extraction for user {state.user_id}")
             # Initialize memory components if not already done
             if not state.memory_components and state.user_id:
@@ -288,15 +293,19 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
             updated_state = await self.enhanced_user_profile_extraction_agent.process(state)
             logger.info(f"[ENHANCED_WORKFLOW] User profile extraction completed for user {state.user_id}")
             
-            # Schedule memory consolidation if needed
+            # Schedule memory consolidation in background (non-blocking)
             if updated_state.memory_consolidation_pending and updated_state.user_id:
-                await self.background_memory_manager.schedule_memory_consolidation(
-                    user_id=updated_state.user_id,
-                    session_id=getattr(updated_state, 'session_id', 'unknown'),
-                    priority=1
+                # Run memory consolidation in background without blocking response
+                import asyncio
+                asyncio.create_task(
+                    self.background_memory_manager.schedule_memory_consolidation(
+                        user_id=updated_state.user_id,
+                        session_id=getattr(updated_state, 'session_id', 'unknown'),
+                        priority=1
+                    )
                 )
                 updated_state.clear_memory_consolidation_pending()
-                logger.info(f"[ENHANCED_WORKFLOW] Scheduled memory consolidation for user {updated_state.user_id}")
+                logger.info(f"[ENHANCED_WORKFLOW] Scheduled background memory consolidation for user {updated_state.user_id}")
 
             return updated_state
 

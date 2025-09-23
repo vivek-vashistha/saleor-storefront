@@ -8,8 +8,122 @@ from backend.domain.entities import ChatState
 from backend.domain.exceptions import ServiceError
 from backend.infrastructure.agents.interfaces import IAgent
 
+from typing import Any, List, Optional
+import os
+import json
 logger = logging.getLogger("conversational_commerce")
 
+
+
+def _escape_prompt_text(text: str) -> str:
+    """Escape curly braces so ChatPromptTemplate doesn't treat JSON keys as variables."""
+    try:
+        return text.replace("{", "{{").replace("}", "}}")
+    except Exception:
+        return text
+
+def _build_extra_instructions(raw_text: str) -> str:
+    """Turn raw JSON/text into clear, actionable prompt instructions."""
+    if not raw_text:
+        return ""
+    try:
+        data = json.loads(raw_text)
+    except Exception:
+        # Not JSON; return escaped text as-is
+        return _escape_prompt_text(raw_text)
+
+    lines: list[str] = []
+    preferences = data.get("preferences", {}) if isinstance(data, dict) else {}
+    budget = data.get("budget_limits", {}) if isinstance(data, dict) else {}
+    past_orders = data.get("past_orders", []) if isinstance(data, dict) else []
+
+    preferred_brands = preferences.get("preferred_brands") or []
+    categories_of_interest = preferences.get("categories_of_interest") or []
+    dietary = preferences.get("dietary") or []
+
+    if preferred_brands:
+        lines.append(
+            "- Preferred brands: " + ", ".join(map(str, preferred_brands)) + ". Prioritize these when proposing products."
+        )
+    if categories_of_interest:
+        lines.append(
+            "- Areas of interest: " + ", ".join(map(str, categories_of_interest)) + ". Reflect these in suggestions."
+        )
+    if dietary:
+        lines.append("- Dietary preferences: " + ", ".join(map(str, dietary)) + ". Avoid conflicts.")
+
+    per_item = budget.get("per_item_max_inr")
+    per_order = budget.get("per_order_max_inr")
+    if per_item or per_order:
+        limit_parts = []
+        if per_item:
+            limit_parts.append(f"per-item <= {per_item} INR")
+        if per_order:
+            limit_parts.append(f"per-order <= {per_order} INR")
+        lines.append("- Budget limits: " + ", ".join(limit_parts) + ". Stay within these when recommending.")
+
+    if past_orders:
+        try:
+            brands = sorted({str(i.get("brand")) for o in past_orders for i in (o.get("items") or []) if i.get("brand")})
+            if brands:
+                lines.append("- Past purchase brands: " + ", ".join(brands) + ". Use as soft preference.")
+        except Exception:
+            pass
+
+    # Behavioral guidance to act on preferences immediately when intent is clear
+    lines.append(
+        "- If the user expresses a clear product intent (e.g., 'vitamin b12'), propose top options first that match preferred brands and budget, then ask one brief follow-up only if needed."
+    )
+
+    return "\n" + "\n".join(lines) + "\n"
+def _load_extra_system_prompt() -> Optional[str]:
+    """Load extra system prompt instructions from JSON or raw text.
+
+    Order of precedence:
+    1) Path from env var SYSTEM_PROMPT_JSON_PATH
+    2) system_prompt_extra.json in this file's directory
+    3) system_prompt_extra.json one and two levels up
+    Returns a non-empty string if available; otherwise None.
+    """
+    candidates: List[str] = []
+    env_path = os.getenv("SYSTEM_PROMPT_JSON_PATH")
+    if env_path:
+        candidates.append(env_path)
+
+    here = os.path.dirname(__file__)
+    candidates.append(os.path.join(here, "system_prompt_extra.json"))
+    candidates.append(os.path.join(os.path.dirname(here), "system_prompt_extra.json"))
+    candidates.append(os.path.join(os.path.dirname(os.path.dirname(here)), "system_prompt_extra.json"))
+    candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(here))), "system_prompt_extra.json"))
+    candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(here)))), "system_prompt_extra.json"))
+
+    for path in candidates:
+        try:
+            if not os.path.exists(path):
+                continue
+            with open(path, "r", encoding="utf-8") as f:
+                raw = f.read()
+            if not raw or not raw.strip():
+                continue
+            try:
+                data = json.loads(raw)
+                if isinstance(data, str):
+                    text = data.strip()
+                else:
+                    text = json.dumps(data, ensure_ascii=False)
+            except Exception:
+                text = raw.strip()
+            if text:
+                return text
+        except Exception:
+            continue
+    return None
+
+
+# Append extra system instructions if provided via JSON/text file
+extra_user_details = _load_extra_system_prompt() or ""
+    # if extra:
+    #     sys_prompt += "\n\n# Extra user details\n" + extra
 
 class EnrichmentResponse(BaseModel):
     """Represents an enrichment response."""
@@ -72,6 +186,7 @@ IMPORTANT: Use this user profile information to personalize your questions. For 
             pass
 
         # Create a prompt for generating questions to enrich the conversation
+        safe_extra_user_details = _build_extra_instructions(extra_user_details)
         prompt = ChatPromptTemplate.from_messages(
             [
                (
@@ -79,6 +194,16 @@ IMPORTANT: Use this user profile information to personalize your questions. For 
                     f"""You are an expert at analyzing conversations about health, wellness and products (vitamins, supplements, sports nutrition, beauty, personal care, grocery).
                     Your task is to generate 2-3 specific questions to gather more information from the user
                     to better understand their needs for products.
+
+                    When referencing prior purchases, do NOT ask the user to list products; instead use declarative phrasing like: 'You bought items in the past ...' and proceed with forward-looking questions.
+
+                    {safe_extra_user_details}
+
+                    PHRASE YOUR RESPONSES TO EXPLICITLY REFERENCE CONTEXT:
+                    - When proposing options or asking follow-ups, explicitly reference user context using phrases like:
+                      "Based on your preferences", "Based on your past orders", or "Based on your history".
+                    - Example: "Based on your preferences (Swanson, budget), here are Vitamin B12 options..."
+
                     Focus on asking questions about:
                     1. Specific product types they might be interested in (e.g., probiotics, magnesium, collagen, vitamin B12)
                     2. Key needs or constraints (e.g., sugar-free, vegan, allergen-free, capsule vs. powder vs. gummy)
@@ -96,6 +221,7 @@ IMPORTANT: Use this user profile information to personalize your questions. For 
                     - If the user has prior purchases, anchor your questions to what they tried, what worked/didn’t, and why.
                     - If ORDER_CONTEXT conflicts with USER_CONTEXT, **ask a clarifying question**.
                     - If ORDER_CONTEXT is empty, **do not mention it**; just ask contextually relevant questions.
+
                     
                     CRITICAL: If the user has mentioned health conditions (like diabetes, sugar problems, etc.), 
                     make sure to ask questions that consider their health needs when recommending supplements or products.

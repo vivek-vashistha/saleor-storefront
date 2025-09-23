@@ -1,0 +1,35 @@
+{
+	"preferences": {
+		"preferred_brands": ["Swanson"],
+		"categories_of_interest": ["Gut Health", "Probiotics", "Magnesium"],
+		"dietary": ["vegetarian"]
+	},
+	"budget_limits": {
+		"per_item_max_inr": 1200,
+		"per_order_max_inr": 2500
+	},
+	"past_orders": [
+		{
+			"currency": "$",
+			"items": [
+				{
+					"sku": "117726",
+					"name": "Swanson, Melatonin, 3 mg, 60 Capsules",
+					"brand": "Swanson",
+					"category": "Sleep",
+					"price": 222.02,
+					"qty": 1
+				},
+				{
+					"sku": "92662",
+					"name": "Natural Simply Delish, Plant-Based Instant Pudding, Chocolate, Sugar Free, 1.7 oz (48 g)",
+					"brand": "Natural Simply Delish",
+					"category": "Grocery",
+					"price": 305.26,
+					"qty": 1
+				}
+			],
+			"total": 527.28
+		}
+	]
+}

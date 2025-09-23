@@ -88,6 +88,48 @@ def get_external_kg_message() -> Optional[str]:
     """Returns the normalized KG message (if any)."""
     return EXTERNAL_KG_MESSAGE
 
+
+def _load_extra_system_prompt() -> Optional[str]:
+    """Load extra system prompt instructions from JSON or raw text.
+
+    Order of precedence:
+    1) Path from env var SYSTEM_PROMPT_JSON_PATH
+    2) system_prompt_extra.json in this file's directory
+    3) system_prompt_extra.json one and two levels up
+    Returns a non-empty string if available; otherwise None.
+    """
+    candidates: List[str] = []
+    env_path = os.getenv("SYSTEM_PROMPT_JSON_PATH")
+    if env_path:
+        candidates.append(env_path)
+
+    here = os.path.dirname(__file__)
+    candidates.append(os.path.join(here, "system_prompt_extra.json"))
+    candidates.append(os.path.join(os.path.dirname(here), "system_prompt_extra.json"))
+    candidates.append(os.path.join(os.path.dirname(os.path.dirname(here)), "system_prompt_extra.json"))
+
+    for path in candidates:
+        try:
+            if not os.path.exists(path):
+                continue
+            with open(path, "r", encoding="utf-8") as f:
+                raw = f.read()
+            if not raw or not raw.strip():
+                continue
+            try:
+                data = json.loads(raw)
+                if isinstance(data, str):
+                    text = data.strip()
+                else:
+                    text = json.dumps(data, ensure_ascii=False)
+            except Exception:
+                text = raw.strip()
+            if text:
+                return text
+        except Exception:
+            continue
+    return None
+
 # ---------------------------------
 # GraphQL tool (UNCHANGED DESCRIPTION)
 # ---------------------------------
@@ -479,6 +521,11 @@ def call_llm(state: MessagesState):
 
     # Base system prompt
     sys_prompt = SYSTEM_PROMPT
+
+    # Append extra system instructions if provided via JSON/text file
+    extra = _load_extra_system_prompt()
+    if extra:
+        sys_prompt += "\n\n# Extra user details\n" + extra
 
     # If we have a KG message, feed it as background
     kg_msg = get_external_kg_message()

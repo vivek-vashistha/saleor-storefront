@@ -1,4 +1,7 @@
 import logging
+import os
+import json
+from typing import Optional, List
 
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
@@ -10,6 +13,103 @@ from backend.infrastructure.agents.interfaces import IAgent
 logger = logging.getLogger("conversational_commerce")
 
 
+
+def _load_extra_system_prompt() -> Optional[str]:
+    """Load extra system prompt instructions from JSON or raw text.
+
+    Order of precedence:
+    1) Path from env var SYSTEM_PROMPT_JSON_PATH
+    2) system_prompt_extra.json in this file's directory
+    3) system_prompt_extra.json up to two parent directories, plus repo root
+    Returns a non-empty string if available; otherwise None.
+    """
+    candidates: List[str] = []
+    env_path = os.getenv("SYSTEM_PROMPT_JSON_PATH")
+    if env_path:
+        candidates.append(env_path)
+
+    here = os.path.dirname(__file__)
+    candidates.append(os.path.join(here, "system_prompt_extra.json"))
+    candidates.append(os.path.join(os.path.dirname(here), "system_prompt_extra.json"))
+    candidates.append(os.path.join(os.path.dirname(os.path.dirname(here)), "system_prompt_extra.json"))
+    candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(here))), "system_prompt_extra.json"))
+
+    for path in candidates:
+        try:
+            if not os.path.exists(path):
+                continue
+            with open(path, "r", encoding="utf-8") as f:
+                raw = f.read()
+            if not raw or not raw.strip():
+                continue
+            return raw.strip()
+        except Exception:
+            continue
+    return None
+
+
+def _build_extra_instructions(raw_text: str) -> str:
+    """Turn raw JSON/text into clear, actionable prompt instructions for search queries."""
+    if not raw_text:
+        return ""
+    try:
+        data = json.loads(raw_text)
+    except Exception:
+        return raw_text
+
+    lines: list[str] = []
+    preferences = data.get("preferences", {}) if isinstance(data, dict) else {}
+    budget = data.get("budget_limits", {}) if isinstance(data, dict) else {}
+    past_orders = data.get("past_orders", []) if isinstance(data, dict) else []
+
+    preferred_brands = preferences.get("preferred_brands") or []
+    categories_of_interest = preferences.get("categories_of_interest") or []
+    dietary = preferences.get("dietary") or []
+
+    if preferred_brands:
+        lines.append(
+            "- ALWAYS include preferred brands in search terms when relevant: "
+            + ", ".join(map(str, preferred_brands))
+            + "."
+        )
+    if categories_of_interest:
+        lines.append(
+            "- Prefer categories of interest when mapping queries: "
+            + ", ".join(map(str, categories_of_interest))
+            + "."
+        )
+    if dietary:
+        lines.append("- Include dietary constraints in queries when relevant: " + ", ".join(map(str, dietary)) + ".")
+
+    per_item = budget.get("per_item_max_inr")
+    per_order = budget.get("per_order_max_inr")
+    if per_item or per_order:
+        budget_hint = []
+        if per_item:
+            budget_hint.append(f"per-item <= {per_item} INR")
+        if per_order:
+            budget_hint.append(f"per-order <= {per_order} INR")
+        lines.append(
+            "- Add budget-awareness keywords to queries (e.g., 'budget-friendly', '<= price'): "
+            + ", ".join(budget_hint)
+            + "."
+        )
+
+    if past_orders:
+        try:
+            brands = sorted({str(i.get("brand")) for o in past_orders for i in (o.get("items") or []) if i.get("brand")})
+            if brands:
+                lines.append(
+                    "- Favor brands previously purchased when relevant: " + ", ".join(brands) + "."
+                )
+        except Exception:
+            pass
+
+    lines.append(
+        "- If the user clearly names a product (e.g., 'vitamin b12'), generate queries that combine the product with preferred brand(s) and budget hints (e.g., 'Swanson Vitamin B12 budget-friendly')."
+    )
+
+    return "\n" + "\n".join(lines) + "\n"
 class SearchQueries(BaseModel):
     """Represents a collection of search queries.
 
@@ -90,10 +190,18 @@ IMPORTANT: Use this user profile information to enhance search queries. For exam
         except Exception:
             pass
 
+        extra = _build_extra_instructions(_load_extra_system_prompt() or "")
+
         system_prompt = f"""You are a product search expert. Your task is to analyze a conversation
                             and extract multiple relevant search queries for finding the products (vitamins, supplements, sports nutrition, beauty, personal care, grocery).
 
                             For each distinct product or need mentioned in the conversation, generate a separate search query.
+
+                            Apply the following user preferences and constraints when crafting queries:
+                            {extra}
+
+                            WORDING REQUIREMENT:
+                            - When outputting or reasoning about queries to be used by downstream components, frame them as coming from user context using phrases like: "Based on the user's preferences/history", "Based on past orders", or "Based on preferences".
 
                             Focus on identifying:
                             1. Specific product types (e.g., probiotics, magnesium, collagen, vitamin B12, creatine)

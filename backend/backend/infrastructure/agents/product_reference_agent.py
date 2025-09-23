@@ -67,6 +67,8 @@ class ProductReferenceAgent(IAgent[ChatState]):
                     Referenced products:
                     {product_descriptions}
 
+                    When referencing prior purchases, do NOT ask the user to list products; instead use declarative phrasing like: 'You bought items in the past ...' and proceed with forward-looking, helpful context.
+
                     DO NOT explicitly mention the concept of "referenced products" in your response. Simply incorporate the product information naturally in the context of the conversation.
                     Respond in a casual, helpful manner.
                     """,

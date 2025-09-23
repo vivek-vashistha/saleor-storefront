@@ -1,0 +1,65 @@
+{
+	"user_id": "u_value_02",
+	"name": "Isha",
+	"preferences": {
+		"price_sensitivity": 0.86,
+		"brand_specificity": 0.45,
+		"preferred_brands": ["Vitamatic"],
+		"categories_of_interest": ["Magnesium", "Gut Health", "Antioxidants"],
+		"dietary": ["gluten-free"]
+	},
+	"budget_limits": {
+		"per_item_max_inr": 1500,
+		"per_order_max_inr": 3000
+	},
+	"past_orders": [
+		{
+			"order_id": "ORD-250923-002",
+			"order_date": "2025-07-16",
+			"currency": "INR",
+			"items": [
+				{
+					"sku": "147597",
+					"name": "Vitamatic, Magnesium Glycinate Powder, 8.8 oz (250 g)",
+					"brand": "Vitamatic",
+					"category": "Magnesium",
+					"price": 1515.42,
+					"qty": 1
+				},
+				{
+					"sku": "115174",
+					"name": "Seeking Health, Magnesium Malate Powder, 500 mg, 8.82 oz (250 g)",
+					"brand": "Seeking Health",
+					"category": "Magnesium",
+					"price": 1780.12,
+					"qty": 1
+				}
+			],
+			"total": 3295.54
+		}
+	],
+	"showcase": {
+		"preference_axis": "Value",
+		"brand_pick_for_copy": "Vitamatic",
+		"bundle_candidates": [
+			"Jarrow Formulas, Vegan Jarro-Dophilus Plus FOS, 100 Veggie Capsules",
+			"NOW Foods, Probiotic-10 Powder, 2 oz (57 g)"
+		],
+		"bundle_candidate_details": [
+			{
+				"sku": "40594",
+				"name": "Jarrow Formulas, Vegan Jarro-Dophilus Plus FOS, 100 Veggie Capsules",
+				"brand": "Jarrow Formulas",
+				"category": "Gut Health",
+				"price": 1849.24
+			},
+			{
+				"sku": "55590",
+				"name": "NOW Foods, Probiotic-10 Powder, 2 oz (57 g)",
+				"brand": "NOW Foods",
+				"category": "Gut Health",
+				"price": 2217.09
+			}
+		]
+	}
+}

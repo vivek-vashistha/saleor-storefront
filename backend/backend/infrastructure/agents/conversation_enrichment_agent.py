@@ -88,14 +88,14 @@ IMPORTANT: Use this user profile information to personalize your questions. For 
                     Make your questions conversational, specific, and contextually appropriate based on what the user has already shared.
                     {user_context}
 
-                    # ORDER CONTEXT: (past purchases, allergens, forms, brands, budgets, results, returns):
+                    ORDER CONTEXT: (past purchases, allergens, forms, brands, budgets, results, returns):
                     
-                    # {order_context}
+                    {order_context}
 
-                    # # How to use ORDER_CONTEXT
-                    # - If the user has prior purchases, anchor your questions to what they tried, what worked/didn’t, and why.
-                    # - If ORDER_CONTEXT conflicts with USER_CONTEXT, **ask a clarifying question**.
-                    # - If ORDER_CONTEXT is empty, **do not mention it**; just ask contextually relevant questions.
+                    # How to use ORDER_CONTEXT
+                    - If the user has prior purchases, anchor your questions to what they tried, what worked/didn’t, and why.
+                    - If ORDER_CONTEXT conflicts with USER_CONTEXT, **ask a clarifying question**.
+                    - If ORDER_CONTEXT is empty, **do not mention it**; just ask contextually relevant questions.
                     
                     CRITICAL: If the user has mentioned health conditions (like diabetes, sugar problems, etc.), 
                     make sure to ask questions that consider their health needs when recommending supplements or products.

@@ -105,8 +105,8 @@ IMPORTANT: Use this user profile information to enhance search queries. For exam
                             You MUST ONLY use categories from this allowed list: {{categories_str}}.
                             If a product doesn't clearly fit into one of these categories, match it to the closest category.
 
-{user_context}
-{order_context}
+                            {user_context}
+                            {order_context}
 
                             CRITICAL: If the user has health conditions (like diabetes, sugar problems, etc.), 
                             make sure to include health-related search terms (e.g., sugar-free, low glycemic) and consider their specific needs when generating queries.

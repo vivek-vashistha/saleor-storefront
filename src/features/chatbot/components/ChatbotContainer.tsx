@@ -80,7 +80,7 @@ export const ChatbotContainer: React.FC = () => {
 			<div className="fixed bottom-4 right-4 z-[1300] flex items-center gap-2">
 				{!isOpen && (
 					<div className="flex max-w-[180px] items-center gap-2 rounded-full bg-[#176142] px-2 py-1.5 text-white shadow-md">
-						<p className="font-sans text-xs font-medium">Need help with gear?</p>
+						<p className="font-sans text-xs font-medium">Need help?</p>
 					</div>
 				)}
 				<Button
@@ -193,7 +193,7 @@ export const ChatbotContainer: React.FC = () => {
 												</Button>
 											</div>
 											<h6 id="chatbot-title" className="font-sans text-lg font-semibold text-[#020617]">
-												OUTDOOR GEAR ADVISOR
+												I-HERB SUPPLEMENTS ADVISOR
 											</h6>
 										</header>
 										<UserDisplay />

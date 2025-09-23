@@ -1,4 +1,4 @@
-import Hero from "./Hero";
+import { Hero } from "./Hero";
 import RewardsBar from "./RewardsBar";
 import FeaturedProducts from "./FeaturedProducts";
 import { ProductListByCollectionDocument } from "@/gql/graphql";

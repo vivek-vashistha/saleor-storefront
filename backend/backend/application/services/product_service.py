@@ -242,12 +242,29 @@ class ProductService:
             class BundleSuggestions(BaseModel):
                 bundles: list[ProductBundleSuggestion] = Field(description="List of suggested bundles")
             
-            # Prepare product information for LLM
+            # Prepare product information for LLM (augment with brand/form for personalization)
+            def _infer_brand(name: str) -> str:
+                try:
+                    return (name.split(",")[0] or name).strip()
+                except Exception:
+                    return ""
+
+            def _infer_form(text: str) -> str:
+                lowered = (text or "").lower()
+                for form in ["capsules", "capsule", "powder", "powders", "gummies", "gummy", "tablets", "tablet", "liquid", "lozenges"]:
+                    if form in lowered:
+                        return form
+                return ""
+
             product_info = []
             for product in products:
+                brand = _infer_brand(product.name)
+                form = _infer_form(f"{product.name} {product.description}")
                 product_info.append({
                     "id": product.product_id,
                     "name": product.name,
+                    "brand": brand,
+                    "form": form,
                     "category": product.category,
                     "price": product.price,
                     "description": product.description,
@@ -259,11 +276,23 @@ class ProductService:
             if user_profile:
                 if user_profile.budget_range:
                     user_context += f"Budget: {user_profile.budget_range}\n"
-                if user_profile.health_conditions:
+                if getattr(user_profile, "health_conditions", None):
                     user_context += f"Health conditions: {', '.join(user_profile.health_conditions)}\n"
-                if user_profile.product_preferences:
+                if getattr(user_profile, "dietary_restrictions", None):
+                    user_context += f"Dietary restrictions: {', '.join(user_profile.dietary_restrictions)}\n"
+                if getattr(user_profile, "product_preferences", None):
                     user_context += f"Product preferences: {', '.join(user_profile.product_preferences)}\n"
-                if user_profile.activity_preferences:
+                    lowered_prefs = ",".join(user_profile.product_preferences).lower()
+                    preferred_forms = [t for t in ["capsules", "powders", "gummies", "tablets", "liquid", "lozenges"] if t in lowered_prefs]
+                    if preferred_forms:
+                        user_context += f"Preferred forms: {', '.join(preferred_forms)}\n"
+                    sustainability_flags = [t for t in ["sustainable", "sustainability", "eco", "eco-friendly", "organic", "ethical", "fair trade", "vegan"] if t in lowered_prefs]
+                    if sustainability_flags:
+                        user_context += f"Sustainability/Ethical preferences: {', '.join(sorted(set(sustainability_flags)))}\n"
+                    brands = [tok.strip() for tok in user_profile.product_preferences if tok and tok[0].isupper() and len(tok.split()) <= 3]
+                    if brands:
+                        user_context += f"Preferred brands: {', '.join(sorted(set(brands)))}\n"
+                if getattr(user_profile, "activity_preferences", None):
                     user_context += f"Activity preferences: {', '.join(user_profile.activity_preferences)}\n"
             
             # Create the prompt
@@ -276,6 +305,14 @@ Your task is to analyze the available products and create meaningful bundles tha
 3. Provide complete solutions for specific needs
 4. Offer good value and complementarity
 
+Personalization rules (apply when user context is provided):
+- Prioritize brands explicitly mentioned by the user when reasonable.
+- Prefer preferred forms (e.g., capsules, powders, gummies, tablets, liquid) indicated by the user.
+- Respect budget sensitivity (e.g., budget-friendly) and avoid overly expensive mixes if budget is tight.
+- If user mentions sustainability/ethical preferences (e.g., sustainable, organic, eco, fair trade, vegan), prefer products aligning with those.
+- Consider dietary restrictions (e.g., vegan) when selecting items.
+- If conflicts arise, pick a sensible compromise and explain briefly in reasoning.
+
 Create bundles that make sense for the user's needs, not just random groupings.
 Consider product categories, functionality, and user preferences.
 
@@ -286,19 +323,20 @@ Respond with JSON format containing up to {max_bundles} bundle suggestions. Use 
     {{
       "bundle_name": "Bundle Name Here",
       "description": "Bundle description here",
-      "product_ids": [1, 2, 3]
+      "product_ids": [1, 2, 3],
+      "reasoning": "Why these items fit the user's preferences (brands, forms, budget, sustainability)"
     }}
   ]
 }}
 
 IMPORTANT: Use "bundles" as the key, not "bundle_suggestions" or any other key name."""),
-                ("human", """Available Products:
+                ("human", """Available Products (with brand/form):
 {product_info}
 
-User Profile:
+User Profile & Preferences:
 {user_context}
 
-Create intelligent product bundles that work well together and meet the user's needs.""")
+Create intelligent product bundles that work well together, meet the user's needs, and reflect their preferences.""")
             ])
             
             # Use the injected LLM instance or create a new one with proper API key

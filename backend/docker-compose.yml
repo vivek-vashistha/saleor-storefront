@@ -67,6 +67,31 @@ services:
       timeout: 10s
       retries: 3
 
+  neo4j:
+    image: neo4j:5.15-community
+    network_mode: "host"
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+    environment:
+      - NEO4J_AUTH=neo4j/password123
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_import_file_use__neo4j__config=true
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password123", "RETURN 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   celery-worker:
     build:
       context: .
@@ -75,6 +100,7 @@ services:
     depends_on:
       - redis
       - mongodb
+      - neo4j
     command: uv run celery -A backend.infrastructure.celery_app worker --loglevel=info --queues=memory_consolidation,memory_processing,memory_cleanup
     env_file: .env
 
@@ -86,6 +112,7 @@ services:
     depends_on:
       - redis
       - mongodb
+      - neo4j
     command: uv run celery -A backend.infrastructure.celery_app beat --loglevel=info
     env_file: .env
 
@@ -93,3 +120,7 @@ volumes:
   qdrant_data:
   mongodb_data:
   redis_data:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_import:
+  neo4j_plugins:

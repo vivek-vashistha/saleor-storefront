@@ -523,7 +523,7 @@ Based on this context, determine if the user wants product bundles or individual
             session.state.add_message("I'm sorry, order processing is not available right now. Please try again later.", is_human=False)
             return
         
-        logger.info(f"Starting order query handling for message: '{message_content}'")
+        # logger.info(f"Starting order query handling for message: '{message_content}'")
         
         # Extract email from the conversation history
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
@@ -532,7 +532,7 @@ Based on this context, determine if the user wants product bundles or individual
         # Check current message and conversation history for emails
         all_messages = [message_content] + [msg.get('content', '') for msg in session.state.messages]
         
-        logger.info(f"Checking {len(all_messages)} messages for email addresses")
+        # logger.info(f"Checking {len(all_messages)} messages for email addresses")
         
         for i, msg in enumerate(all_messages):
             if isinstance(msg, str):
@@ -541,7 +541,7 @@ Based on this context, determine if the user wants product bundles or individual
                     logger.info(f"Found emails in message {i}: {found_emails}")
                 emails.extend(found_emails)
         
-        logger.info(f"Total emails found: {emails}")
+        # logger.info(f"Total emails found: {emails}")
          # Fallback to user profile email if no email was found in messages
         profile_email = (session.state.user_profile.email or '').strip() if session.state and session.state.user_profile else ''
         if not emails and profile_email:
@@ -561,10 +561,10 @@ Based on this context, determine if the user wants product bundles or individual
         
         # Use the first email found
         user_email = emails[0]
-        logger.info(f"Using email: {user_email}")
+        # logger.info(f"Using email: {user_email}")
         
         try:
-            logger.info(f"Calling order graph API with question: '{message_content}', email: {user_email}")
+            # logger.info(f"Calling order graph API with question: '{message_content}', email: {user_email}")
             
             # Reuse cache if same email and we recently fetched
             cached = session.state.order_api_cache or {}
@@ -586,7 +586,7 @@ Based on this context, determine if the user wants product bundles or individual
             # Extract the final answer
             final_answer = self._extract_final_answer(order_response)
             
-            logger.info(f"Extracted final answer: {final_answer}")
+            # logger.info(f"Extracted final answer: {final_answer}")
             
             if final_answer and final_answer != "No response received from the API." and "error" not in final_answer.lower():
                 # # Optionally enrich with product line items from local store (most recent order)
@@ -659,14 +659,14 @@ Based on this context, determine if the user wants product bundles or individual
                 "document_names": json.dumps([])
             }
             
-            logger.info(f"Calling external API: {url} with data: {data}")
+            logger.info(f"Calling external API: {url}")
             
             # Make the request (async, non-blocking)
             async with httpx.AsyncClient() as client:
                 response = await client.post(url, data=data, timeout=timeout_seconds)
                 response.raise_for_status()
                 result = response.json()
-            logger.info(f"External API response: {result}")
+            # logger.info(f"External API response: {result}")
             return result
             
         except httpx.RequestError as e:

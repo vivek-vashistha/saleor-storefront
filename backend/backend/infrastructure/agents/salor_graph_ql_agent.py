@@ -32,7 +32,8 @@ logger = logging.getLogger("gql.transport.requests")
 logger.setLevel(logging.INFO)
 
 # Add our length filter
-logger.addFilter(LengthFilter(max_length=2500))
+# logger.addFilter(LengthFilter(max_length=2500))
+logger.addFilter(LengthFilter(max_length=250))
 
 # ---------------------------------
 # Config
@@ -97,18 +98,6 @@ graphql_wrapper = GraphQLAPIWrapper(
     custom_headers=headers,
     fetch_schema_from_transport=True,
 )
-
-# graphql_tool = BaseGraphQLTool(
-#     graphql_wrapper=graphql_wrapper,
-#     # IMPORTANT: Per user request, keep the same description
-#     description=(
-#         "Input is a valid Saleor GraphQL query/mutation string. "
-#         "For ANY availability/publication/pricing, ALWAYS pass the channel argument "
-#         f'and call product(..., channel: "{CHANNEL_SLUG}"). '
-#         "Never use isAvailable without a channel. Prefer Product.channelListings "
-#         "for the target channel (isPublished, availableForPurchaseAt, visibleInListings)."
-#     )
-# )
 
 graphql_tool = BaseGraphQLTool(
     graphql_wrapper=graphql_wrapper,
@@ -331,37 +320,6 @@ def build_bulk_product_query(ids: List[str]) -> str:
 # ---------------------------------
 # System prompt: simplified flow + strict output
 # ---------------------------------
-# SYSTEM_PROMPT = f"""
-# You are a Saleor shopping copilot for online retailers. You have exactly ONE tool: query_graphql. You may call it multiple times per turn.
-
-# HOW TO USE THE INPUT
-# - Each user turn is provided in this structure: "Users query", "Additional details", "KG products" (optional), and "KG response" (optional).
-# - Treat the two KG sections as helpful background only; ALWAYS verify details (esp. price/currency and channel data) via Saleor GraphQL.
-# - If query is related to the customer orders you can just used the email id to fetch the orders details.
-
-# WHAT TO DO (simplified flow)
-# 1) Read the Inputs. Combine "Users query" + "Additional details" (+KG if present).
-# 2) Decide what is missing to fully answer.
-# 3) Generate one or more sub-queries (GraphQL) to fetch anything missing and/or final data.
-# 4) Call the GraphQL tool for each sub-query. You MAY call it multiple times.
-# 5) Summarize tool outputs and return the final answer.
-
-# OUTPUT FORMAT (must match EXACTLY; no extra sections)
-# ### Inputs
-# - users_query: <verbatim from input>
-# - additional_details: <short>
-# - kg_products: <short or N/A>
-# - kg_response: <short or N/A>
-
-# ### Generated queries
-# <One bullet per sub-query. For each, state purpose and the GraphQL operation name or a short label. Do NOT reveal chain-of-thought.>
-
-# ### Tool call responses
-# <One short bullet block per sub-query: 1–3 bullets summarizing the key data returned (product names/IDs, availability, currency and price ranges, etc.).>
-
-# ### Final response
-# <Concise, user-facing answer that directly addresses the original request. Include currency/channel where relevant.>
-# """
 
 SYSTEM_PROMPT = f"""
 You are a Saleor shopping copilot for online retailers. You have exactly ONE tool: query_graphql. You may call it multiple times per turn.
@@ -444,12 +402,7 @@ F) Try single-step return+refund first:
 
 Relay rule: EVERY connection MUST include first/last to paginate.
 Never invent field names. Prefer fields shown in the tool description.
-
-
 """
-
-
-
 
 llm = ChatOpenAI(model=OPENAI_MODEL, temperature=0).bind_tools(TOOLS)
 

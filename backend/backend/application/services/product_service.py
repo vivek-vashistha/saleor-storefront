@@ -326,22 +326,54 @@ Create intelligent product bundles that work well together and meet the user's n
             
             # Convert LLM suggestions to ProductBundle objects
             bundles = []
-            for suggestion in result.bundles:
+
+            # Support both dict and Pydantic outputs from the parser
+            try:
+                if hasattr(result, "bundles"):
+                    suggestions = result.bundles  # Pydantic model instance
+                elif isinstance(result, dict):
+                    suggestions = result.get("bundles")
+                    # Be defensive about alternate keys or nesting
+                    if suggestions is None:
+                        alt = result.get("bundle_suggestions") or result.get("suggestions")
+                        if isinstance(alt, dict):
+                            suggestions = alt.get("bundles")
+                        elif isinstance(alt, list):
+                            suggestions = alt
+                else:
+                    suggestions = None
+            except Exception as parse_err:
+                logger.error(f"Unexpected format from LLM parser: {parse_err}")
+                suggestions = None
+
+            if not suggestions:
+                logger.warning("LLM returned no 'bundles' data; falling back to simple bundling")
+                return self._create_fallback_bundles(products, max_bundles)
+
+            for suggestion in suggestions:
+                # Extract product_ids defensively from dict or Pydantic object
+                if isinstance(suggestion, dict):
+                    product_ids = suggestion.get("product_ids", [])
+                    bundle_name = suggestion.get("bundle_name", "")
+                else:
+                    product_ids = getattr(suggestion, "product_ids", [])
+                    bundle_name = getattr(suggestion, "bundle_name", "")
+
                 # Find the actual products by ID
                 bundle_products = []
-                for product_id in suggestion.product_ids:
+                for product_id in product_ids:
                     for product in products:
                         if product.product_id == product_id:
                             bundle_products.append(product)
                             break
-                
+
                 if bundle_products:  # Only create bundle if we found the products
                     bundle = ProductBundle(
                         products=bundle_products,
                         bundle_id=f"llm_bundle_{len(bundles) + 1}"
                     )
                     bundles.append(bundle)
-                    logger.info(f"Created LLM bundle: {suggestion.bundle_name} with {len(bundle_products)} products")
+                    logger.info(f"Created LLM bundle: {bundle_name} with {len(bundle_products)} products")
             
             logger.info(f"Created {len(bundles)} LLM-based intelligent bundles")
             return bundles[:max_bundles]

@@ -13,6 +13,14 @@ class Neo4jConfig(BaseModel):
     max_connection_pool_size: int = Field(default=50, description="Maximum connection pool size")
     connection_timeout: int = Field(default=30, description="Connection timeout in seconds")
     
+    def get_connection_url(self) -> str:
+        """Get the Neo4j connection URL.
+        
+        Returns:
+            The Neo4j connection URI
+        """
+        return self.uri
+    
     @classmethod
     def from_env(cls) -> "Neo4jConfig":
         """Create Neo4jConfig from environment variables."""

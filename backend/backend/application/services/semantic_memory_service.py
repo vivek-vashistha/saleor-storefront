@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from backend.domain.entities.enhanced_chat import EnhancedChatState, EnhancedUserProfile
 from backend.domain.entities.product import Product
+from backend.application.services.hybrid_memory_service import HybridMemoryService
 
 logger = logging.getLogger("conversational_commerce.semantic_memory")
 
@@ -73,15 +74,17 @@ class SemanticMemoryConfig(BaseModel):
 
 
 class SemanticMemoryService:
-    """Service for managing semantic memory using Langmem."""
+    """Service for managing semantic memory using hybrid storage (MongoDB + Qdrant)."""
     
-    def __init__(self, config: SemanticMemoryConfig):
+    def __init__(self, config: SemanticMemoryConfig, hybrid_memory_service: HybridMemoryService):
         """Initialize the semantic memory service.
         
         Args:
             config: Configuration for the semantic memory service
+            hybrid_memory_service: Hybrid memory service for persistent storage
         """
         self.config = config
+        self.hybrid_memory = hybrid_memory_service
         self.llm = ChatOpenAI(
             model=config.llm_model,
             api_key=config.openai_api_key,
@@ -92,7 +95,7 @@ class SemanticMemoryService:
             api_key=config.openai_api_key
         )
         
-        # Create memory store
+        # Keep InMemoryStore for Langmem compatibility (will be deprecated)
         self.store = InMemoryStore(
             index={
                 "dims": 1536,  # OpenAI embedding dimension
@@ -109,7 +112,7 @@ class SemanticMemoryService:
             enable_deletes=True,
         )
         
-        # Create memory store manager for storage operations
+        # Create memory store manager for storage operations (will use hybrid storage)
         self.store_manager = create_memory_store_manager(
             self.llm,
             schemas=[UserPreference, ProductInteraction, ConversationTheme],
@@ -117,7 +120,7 @@ class SemanticMemoryService:
             enable_inserts=True,
             enable_deletes=True,
             namespace=("conversations", "{langgraph_user_id}", "memories"),
-            store=self.store
+            store=self.store  # Will be replaced with hybrid storage
         )
         
     async def initialize_user_memory(self, user_id: str) -> Dict[str, Any]:
@@ -151,7 +154,7 @@ class SemanticMemoryService:
         messages: List[Dict[str, Any]],
         context: Dict[str, Any]
     ) -> None:
-        """Record a conversation in semantic memory.
+        """Record a conversation in semantic memory using hybrid storage.
         
         Args:
             user_id: The user's ID
@@ -159,17 +162,25 @@ class SemanticMemoryService:
             context: Additional context (products, search queries, etc.)
         """
         try:
-            # Convert messages to the format expected by Langmem
-            formatted_messages = self._format_messages_for_langmem(messages)
+            # Extract session_id from context if available
+            session_id = context.get("session_id")
             
-            # Use the store_manager to handle memory extraction and storage automatically
-            # The store_manager will automatically search for relevant memories, extract new ones,
-            # and store them in the configured store
-            await self.store_manager.ainvoke({
-                "messages": formatted_messages
-            }, config={"configurable": {"langgraph_user_id": user_id}})
+            # Store conversation chunks for context retrieval
+            conversation_text = self._format_conversation_for_analysis(messages)
             
-            logger.info(f"[SEMANTIC_MEMORY] Recorded memories for user {user_id} using store_manager")
+            # Store conversation chunk in Qdrant for semantic search
+            await self.hybrid_memory.store_conversation_chunk(
+                user_id=user_id,
+                session_id=session_id or "unknown",
+                conversation_chunk=conversation_text,
+                message_type="conversation",
+                metadata={"context": context}
+            )
+            
+            # Extract and store structured memories
+            await self._extract_and_store_memories(user_id, messages, context, session_id)
+            
+            logger.info(f"[SEMANTIC_MEMORY] Recorded conversation for user {user_id} using hybrid storage")
                 
         except Exception as e:
             logger.error(f"[SEMANTIC_MEMORY] Error recording conversation for user {user_id}: {e}")
@@ -195,6 +206,112 @@ class SemanticMemoryService:
             formatted.append({"role": role, "content": str(content)})
         
         return formatted
+    
+    async def _extract_and_store_memories(
+        self,
+        user_id: str,
+        messages: List[Dict[str, Any]],
+        context: Dict[str, Any],
+        session_id: Optional[str] = None
+    ) -> None:
+        """Extract and store structured memories from conversation.
+        
+        Args:
+            user_id: The user's ID
+            messages: List of conversation messages
+            context: Additional context
+            session_id: Optional session ID
+        """
+        try:
+            conversation_text = self._format_conversation_for_analysis(messages)
+            
+            # Extract different types of memories
+            memories_to_store = []
+            
+            # Extract user preferences
+            preferences = await self._extract_user_preferences(conversation_text)
+            for preference in preferences:
+                memories_to_store.append({
+                    "content": preference,
+                    "type": "user_preference",
+                    "confidence": 0.8
+                })
+            
+            # Extract product interactions
+            interactions = await self._extract_product_interactions(conversation_text, context)
+            for interaction in interactions:
+                memories_to_store.append({
+                    "content": interaction,
+                    "type": "product_interaction",
+                    "confidence": 0.9
+                })
+            
+            # Extract conversation themes
+            themes = await self._extract_conversation_themes(conversation_text)
+            for theme in themes:
+                memories_to_store.append({
+                    "content": theme,
+                    "type": "conversation_theme",
+                    "confidence": 0.7
+                })
+            
+            # Store each memory in hybrid storage
+            for memory_data in memories_to_store:
+                await self.hybrid_memory.store_memory(
+                    user_id=user_id,
+                    memory_content=memory_data["content"],
+                    memory_type=memory_data["type"],
+                    session_id=session_id,
+                    confidence=memory_data["confidence"],
+                    importance_score=0.5,
+                    additional_metadata={"extracted_at": datetime.now().isoformat()}
+                )
+            
+            logger.info(f"[SEMANTIC_MEMORY] Extracted and stored {len(memories_to_store)} memories for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"[SEMANTIC_MEMORY] Error extracting memories for user {user_id}: {e}")
+    
+    async def _extract_user_preferences(self, conversation_text: str) -> List[str]:
+        """Extract user preferences from conversation."""
+        from langchain_core.prompts import ChatPromptTemplate
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """Extract user preferences and interests from this conversation.
+            Return a list of specific preferences mentioned by the user.
+            Focus on outdoor gear, activities, brands, and personal preferences."""),
+            ("human", "Conversation:\n{conversation}")
+        ])
+        
+        chain = prompt | self.llm
+        result = await chain.ainvoke({"conversation": conversation_text})
+        
+        # Parse preferences from response
+        preferences = []
+        for line in result.content.split('\n'):
+            if line.strip() and not line.startswith('#'):
+                preferences.append(line.strip('- ').strip())
+        
+        return preferences[:5]  # Limit to 5 preferences
+    
+    async def _extract_product_interactions(self, conversation_text: str, context: Dict[str, Any]) -> List[str]:
+        """Extract product interactions from conversation."""
+        interactions = []
+        
+        # Extract from context if products are mentioned
+        if "products" in context:
+            for product in context["products"]:
+                if hasattr(product, 'name'):
+                    interactions.append(f"Discussed product: {product.name}")
+        
+        # Extract from conversation text
+        if "like" in conversation_text.lower() or "love" in conversation_text.lower():
+            interactions.append("Expressed product preferences")
+        
+        if "buy" in conversation_text.lower() or "purchase" in conversation_text.lower():
+            interactions.append("Showed purchase intent")
+        
+        return interactions
     
     async def extract_semantic_context(
         self,
@@ -241,7 +358,7 @@ class SemanticMemoryService:
         query: str,
         limit: int = 5
     ) -> List[Dict[str, Any]]:
-        """Retrieve relevant memories for a query.
+        """Retrieve relevant memories for a query using hybrid storage.
         
         Args:
             user_id: The user's ID
@@ -252,26 +369,16 @@ class SemanticMemoryService:
             List of relevant memories
         """
         try:
-            # Search memories in the store
-            # Use the store_manager to search for memories
-            memories = self.store_manager.search(
+            # Use hybrid memory service for semantic search
+            memories = await self.hybrid_memory.search_memories(
+                user_id=user_id,
                 query=query,
-                config={"configurable": {"langgraph_user_id": user_id}}
+                limit=limit,
+                include_metadata=True
             )
             
-            # Convert to dictionary format
-            memory_list = []
-            for memory in memories:
-                memory_list.append({
-                    "id": memory.key,
-                    "content": memory.value,
-                    "created_at": memory.created_at,
-                    "updated_at": memory.updated_at,
-                    "score": memory.score
-                })
-            
-            logger.info(f"[SEMANTIC_MEMORY] Retrieved {len(memory_list)} relevant memories for user {user_id}")
-            return memory_list
+            logger.info(f"[SEMANTIC_MEMORY] Retrieved {len(memories)} relevant memories for user {user_id}")
+            return memories
             
         except Exception as e:
             logger.error(f"[SEMANTIC_MEMORY] Error retrieving memories for user {user_id}: {e}")
@@ -281,7 +388,7 @@ class SemanticMemoryService:
         self,
         user_id: str
     ) -> Dict[str, Any]:
-        """Consolidate and summarize user memories.
+        """Consolidate and summarize user memories using hybrid storage.
         
         Args:
             user_id: The user's ID
@@ -290,20 +397,14 @@ class SemanticMemoryService:
             Dictionary containing consolidated memory insights
         """
         try:
-            # Get all memories for the user
-            all_memories = self.store.search(
-                ("conversations", user_id, "memories"),  # namespace as first positional argument
-                limit=1000
+            # Use hybrid memory service for consolidation
+            consolidation_result = await self.hybrid_memory.consolidate_user_memories(
+                user_id=user_id,
+                force_consolidation=False
             )
             
-            if len(all_memories) < self.config.consolidation_threshold:
-                return {"status": "insufficient_memories", "count": len(all_memories)}
-            
-            # Consolidate memories
-            consolidated = await self._consolidate_memory_patterns(all_memories)
-            
             logger.info(f"[SEMANTIC_MEMORY] Consolidated memories for user {user_id}")
-            return consolidated
+            return consolidation_result
             
         except Exception as e:
             logger.error(f"[SEMANTIC_MEMORY] Error consolidating memories for user {user_id}: {e}")

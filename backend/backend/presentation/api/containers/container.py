@@ -30,5 +30,6 @@ class Container(containers.DeclarativeContainer):
         saleor_connection=infrastructure.saleor_connection,
         llm=infrastructure.llm,
         ai_settings=infrastructure.config,
+        hybrid_memory_service=infrastructure.hybrid_memory_service,
     )
     application.check_dependencies()

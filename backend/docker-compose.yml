@@ -1,16 +1,16 @@
 services:
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    network_mode: "host"
-    container_name: python_backend
-    ports:
-      - "4003:4003"
-    depends_on:
-      - mongodb
-      - qdrant
-    env_file: .env
+  # backend:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   network_mode: "host"
+  #   container_name: python_backend
+  #   ports:
+  #     - "4003:4003"
+  #   depends_on:
+  #     - mongodb
+  #     - qdrant
+  #   env_file: .env
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -28,15 +28,15 @@ services:
       timeout: 10s
       retries: 3
 
-  product_loader:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    network_mode: "host"
-    depends_on:
-      - qdrant
-    command: uv run python -m scripts.load_products_to_qdrant
-    env_file: .env
+  # product_loader:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   network_mode: "host"
+  #   depends_on:
+  #     - qdrant
+  #   command: uv run python -m scripts.load_products_to_qdrant
+  #   env_file: .env
 
   mongodb:
     image: mongo:latest

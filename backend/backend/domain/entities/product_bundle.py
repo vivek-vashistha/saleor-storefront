@@ -17,4 +17,4 @@ class ProductBundle(BaseModel):
     products: list[Product] = Field(
         default_factory=list, description="List of products in this bundle, each from a different category"
     )
-    bundle_id: int | None = Field(default=None, description="Identifier for the bundle")
+    bundle_id: str | None = Field(default=None, description="Identifier for the bundle")

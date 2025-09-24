@@ -39,6 +39,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     saleor_connection = providers.Dependency()
     llm = providers.Dependency()
     ai_settings = providers.Dependency()
+    hybrid_memory_service = providers.Dependency()
 
     # Memory Services
     semantic_memory_config = providers.Factory(
@@ -48,7 +49,8 @@ class ApplicationContainer(containers.DeclarativeContainer):
 
     semantic_memory_service = providers.Singleton(
         SemanticMemoryService,
-        config=semantic_memory_config
+        config=semantic_memory_config,
+        hybrid_memory_service=hybrid_memory_service
     )
 
     background_memory_manager = providers.Singleton(

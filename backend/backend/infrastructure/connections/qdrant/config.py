@@ -37,4 +37,8 @@ class QdrantConfig:
         Returns:
             str: The connection URL.
         """
-        return f"{self.host}:{self.port}"
+        # Use HTTP for local development, HTTPS for production
+        if self.host in ["localhost", "127.0.0.1"]:
+            return f"http://{self.host}:{self.port}"
+        else:
+            return f"https://{self.host}:{self.port}"

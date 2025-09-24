@@ -39,10 +39,17 @@ class ConnectionManager:
             session_id: The chat session ID
         """
         if session_id in self.active_connections:
-            self.active_connections[session_id].remove(websocket)
-            if not self.active_connections[session_id]:
-                del self.active_connections[session_id]
-            logger.info(f"WebSocket disconnected for session {session_id}")
+            try:
+                self.active_connections[session_id].remove(websocket)
+                if not self.active_connections[session_id]:
+                    del self.active_connections[session_id]
+                logger.info(f"WebSocket disconnected for session {session_id}")
+            except ValueError:
+                # WebSocket was already removed or not in the list
+                logger.warning(f"WebSocket was not found in active connections for session {session_id}")
+                # Clean up empty session if it exists
+                if session_id in self.active_connections and not self.active_connections[session_id]:
+                    del self.active_connections[session_id]
 
     async def send_personal_message(self, message: dict, session_id: str) -> None:
         """Send a message to all connections for a specific session.

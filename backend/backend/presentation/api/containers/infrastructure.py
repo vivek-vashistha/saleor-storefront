@@ -12,6 +12,10 @@ from backend.infrastructure.connections import (
 )
 from backend.infrastructure.factories import AgentFactory, EmbeddingFactory, LLMFactory
 from backend.infrastructure.repositories import MongoDBChatSessionRepository, SaleorOrderRepository, Neo4jProductRepository, QdrantProductRepository
+from backend.infrastructure.repositories.memory_repository.mongodb_memory_repository import MongoDBMemoryRepository
+from backend.infrastructure.repositories.memory_repository.qdrant_memory_repository import QdrantMemoryRepository
+from backend.application.services.hybrid_memory_service import HybridMemoryService
+from backend.application.services.semantic_memory_service import SemanticMemoryService, SemanticMemoryConfig
 from backend.settings import AISettings, MongoDBSettings, Neo4jSettings, QdrantSettings, SaleorSettings, WeatherSettings
 
 
@@ -124,6 +128,36 @@ class InfrastructureContainer(containers.DeclarativeContainer):
     order_repository = providers.Singleton(
         SaleorOrderRepository,
         connection=mongodb_connection,
+    )
+
+    # Memory repositories
+    mongodb_memory_repository = providers.Singleton(
+        MongoDBMemoryRepository,
+        connection=mongodb_connection,
+    )
+
+    qdrant_memory_repository = providers.Singleton(
+        QdrantMemoryRepository,
+        connection=qdrant_connection,
+    )
+
+    # Hybrid memory service
+    hybrid_memory_service = providers.Singleton(
+        HybridMemoryService,
+        mongodb_repository=mongodb_memory_repository,
+        qdrant_repository=qdrant_memory_repository,
+    )
+
+    # Semantic memory service
+    semantic_memory_config = providers.Singleton(
+        SemanticMemoryConfig.from_ai_settings,
+        ai_settings=config
+    )
+
+    semantic_memory_service = providers.Singleton(
+        SemanticMemoryService,
+        config=semantic_memory_config,
+        hybrid_memory_service=hybrid_memory_service,
     )
 
     # Agent Factory

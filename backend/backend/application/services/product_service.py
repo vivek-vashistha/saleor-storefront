@@ -279,7 +279,19 @@ Your task is to analyze the available products and create meaningful bundles tha
 Create bundles that make sense for the user's needs, not just random groupings.
 Consider product categories, functionality, and user preferences.
 
-Respond with JSON format containing up to {max_bundles} bundle suggestions."""),
+Respond with JSON format containing up to {max_bundles} bundle suggestions. Use this EXACT structure:
+
+{{
+  "bundles": [
+    {{
+      "bundle_name": "Bundle Name Here",
+      "description": "Bundle description here",
+      "product_ids": [1, 2, 3]
+    }}
+  ]
+}}
+
+IMPORTANT: Use "bundles" as the key, not "bundle_suggestions" or any other key name."""),
                 ("human", """Available Products:
 {product_info}
 
@@ -326,8 +338,7 @@ Create intelligent product bundles that work well together and meet the user's n
                 if bundle_products:  # Only create bundle if we found the products
                     bundle = ProductBundle(
                         products=bundle_products,
-                        bundle_id=f"llm_bundle_{len(bundles) + 1}",
-                        description=f"{suggestion.bundle_name}: {suggestion.description}"
+                        bundle_id=f"llm_bundle_{len(bundles) + 1}"
                     )
                     bundles.append(bundle)
                     logger.info(f"Created LLM bundle: {suggestion.bundle_name} with {len(bundle_products)} products")

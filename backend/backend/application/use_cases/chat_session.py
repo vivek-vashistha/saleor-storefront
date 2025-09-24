@@ -260,7 +260,7 @@ class ProcessChatMessageUseCase:
                 else:
                     logger.info("LLM determined user wants individual products - getting product list")
                     products = await self.product_service.get_products_for_query(
-                        session.state.search_queries[0], max_num_results=5
+                        session.state.search_queries[0], max_num_results=5, user_profile=session.state.user_profile
                     )
 
                     if products:

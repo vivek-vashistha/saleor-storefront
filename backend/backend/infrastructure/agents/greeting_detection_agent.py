@@ -48,26 +48,46 @@ class GreetingDetectionAgent(IAgent[ChatState]):
         greeting_response = await chain.ainvoke({"message": message})
         return greeting_response
 
-    async def generate_greeting_response(self, message: str) -> str:
+    async def generate_greeting_response(self, message: str, user_profile=None) -> str:
         """Generate a greeting response with information about the assistant's capabilities.
 
         Args:
             message (str): The user's message'
+            user_profile: Optional user profile/state for personalization
 
         Returns:
             A friendly greeting response string
         """
+        # Build user context from profile for personalization
+        user_context = ""
+        try:
+            if user_profile and getattr(user_profile, "has_user_profile", False):
+                profile = getattr(user_profile, "user_profile", None) or user_profile
+                if profile and hasattr(profile, "get_relevant_context"):
+                    summary = profile.get_relevant_context("general")
+                    if summary:
+                        user_context = f"\n\nUSER CONTEXT (use to personalize tone/examples):\n{summary}\n"
+        except Exception:
+            pass
+
         prompt = ChatPromptTemplate.from_messages(
             [
                 (
                     "system",
-                    """You are a friendly assistant for an health and wellness store (vitamins, supplements, sports nutrition, beauty, personal care, grocery).
+                    f"""You are a friendly assistant for an health and wellness store (vitamins, supplements, sports nutrition, beauty, personal care, grocery).
                     Craft a warm greeting that:
                     1. Welcomes the user
                     2. Naturally flows after the user's greeting/message
                     3. Briefly explains that you can help find products (e.g., probiotics for gut health, magnesium for sleep, collagen for skin, vitamin B12 for energy, keto baking flour)
                     4. Provides 1-2 examples of what users can ask about.
                     5. Keeps the message concise (under 75 words) and conversational
+
+                    Personalization rules:
+                    - If USER CONTEXT is provided, subtly tailor examples or tone (e.g., mention a relevant goal, category, or form like capsules/powders) without revealing private data.
+                    - If budget is mentioned, you may say you can find budget-friendly options.
+                    - Never fabricate facts; keep it helpful and lightweight.
+
+                    {user_context}
 
                     Respond with just the greeting message, no additional text.
                     """,
@@ -109,7 +129,7 @@ class GreetingDetectionAgent(IAgent[ChatState]):
 
             if is_greeting_response.is_greeting:
                 # Generate greeting response
-                greeting_response = await self.generate_greeting_response(last_message)
+                greeting_response = await self.generate_greeting_response(last_message, state)
 
                 # Add the greeting response to the state
                 state.messages.append(AIMessage(content=greeting_response).model_dump())

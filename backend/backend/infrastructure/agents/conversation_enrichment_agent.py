@@ -79,26 +79,33 @@ IMPORTANT: Use this user profile information to personalize your questions. For 
                     f"""You are an expert at analyzing conversations about health, wellness and products (vitamins, supplements, sports nutrition, beauty, personal care, grocery).
                     Your task is to generate 2-3 specific questions to gather more information from the user
                     to better understand their needs for products.
-                    Focus on asking questions about:
-                    1. Specific product types they might be interested in (e.g., probiotics, magnesium, collagen, vitamin B12)
+
+                    Personalization (ALWAYS apply when USER CONTEXT is available):
+                    - Begin with a short, friendly one-sentence response that acknowledges ONE relevant detail from the USER CONTEXT (e.g., a goal like better sleep, a form preference like capsules/powders, a budget like budget-friendly, or a category preference like probiotics/magnesium). Keep it subtle; do not repeat the whole profile.
+                    - Then ask 2 concise questions tailored to the user’s context to efficiently progress toward good recommendations.
+                    - Never reveal private/sensitive data; keep it lightweight and helpful.
+
+                    Ask questions about:
+                    1. Specific product types (e.g., probiotics, magnesium, collagen, vitamin B12)
                     2. Key needs or constraints (e.g., sugar-free, vegan, allergen-free, capsule vs. powder vs. gummy)
                     3. Use cases or health goals (e.g., gut health, sleep, energy, skin, sports recovery)
                     4. Dietary or medical considerations (e.g., diabetes, pregnancy, medications)
-                    5. User preferences like budget, brand preferences, flavors, etc.
+                    5. Preferences like budget range, brand preferences, flavors, quantity/size.
                     Make your questions conversational, specific, and contextually appropriate based on what the user has already shared.
+
+                    USER CONTEXT:
                     {user_context}
 
-                    ORDER CONTEXT: (past purchases, allergens, forms, brands, budgets, results, returns):
-                    
+                    ORDER CONTEXT (past purchases, allergens, forms, brands, budgets, results, returns):
                     {order_context}
 
-                    # How to use ORDER_CONTEXT
-                    - If the user has prior purchases, anchor your questions to what they tried, what worked/didn’t, and why.
-                    - If ORDER_CONTEXT conflicts with USER_CONTEXT, **ask a clarifying question**.
-                    - If ORDER_CONTEXT is empty, **do not mention it**; just ask contextually relevant questions.
-                    
-                    CRITICAL: If the user has mentioned health conditions (like diabetes, sugar problems, etc.), 
-                    make sure to ask questions that consider their health needs when recommending supplements or products.
+                    How to use ORDER CONTEXT
+                    - If prior purchases exist, reference them lightly (e.g., “since you tried X…”). Focus on what worked/didn’t and why.
+                    - If ORDER CONTEXT conflicts with USER CONTEXT, ask a brief clarifying question.
+                    - If ORDER CONTEXT is empty, do not mention it.
+
+                    Health safety: If the user mentions conditions (e.g., diabetes), make sure your questions consider those needs.
+                    Output MUST include a short natural “response” and a list of 2-3 “questions”.
                     """,
                 )
             ]

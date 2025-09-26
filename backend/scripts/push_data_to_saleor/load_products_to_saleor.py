@@ -23,7 +23,8 @@ TOTAL_RECORDS = int(os.getenv("TOTAL_RECORDS", "0"))  # Total records to process
 SKIP_HEADER = os.getenv("SKIP_HEADER", "true").lower() == "true"  # Whether to skip header row
 
 # Results output configuration
-OUTPUT_RESULTS_CSV = os.getenv("OUTPUT_RESULTS_CSV", "../../data/gear/saleor_import_results.csv")
+# OUTPUT_RESULTS_CSV = os.getenv("OUTPUT_RESULTS_CSV", "../../data/gear/saleor_import_results.csv")
+OUTPUT_RESULTS_CSV = os.getenv("OUTPUT_RESULTS_CSV", "../../data/iherb/iherb_product_data - for_Neo4j_push_v3_with_saleor_ID.csv")
 
 # ========= CACHING SYSTEM =========
 CACHE_DIR = "cache"
@@ -363,6 +364,18 @@ mutation ($name: String!, $slug: String!) {
 }
 """
 
+M_CATEGORY_CREATE_WITH_PARENT = """
+mutation ($name: String!, $slug: String!, $parent: ID) {
+  categoryCreate(
+    input: { name: $name, slug: $slug }
+    parent: $parent
+  ) {
+    category { id name slug parent { id } }
+    errors { field code message }
+  }
+}
+"""
+
 # Product Types
 Q_PRODUCT_TYPE_BY_SLUG = """
 query ($slug: String!) {
@@ -648,6 +661,79 @@ def get_or_create_category(slug: str, name: Optional[str] = None) -> str:
     set_cached_id("categories", slug, category_id)
     print(f"Created and cached category: {slug} -> {category_id}")
     return category_id
+
+def get_or_create_category_with_parent(slug: str, name: Optional[str], parent_id: Optional[str]) -> str:
+    """Get or create a category, optionally as a child of parent_id."""
+    # First try cache/simple lookup by slug
+    try:
+        res = gql(Q_CATEGORY_BY_SLUG, {"slug": slug})
+        if res.get("category"):
+            return res["category"]["id"]
+    except Exception:
+        pass
+
+    # Create with optional parent via inline input
+    vars_payload = {
+        "name": (name or slug.replace("-", " ").title()),
+        "slug": slug,
+        "parent": parent_id,
+    }
+    create = gql(M_CATEGORY_CREATE_WITH_PARENT, vars_payload)
+    errs = create.get("categoryCreate", {}).get("errors")
+    if errs:
+        raise RuntimeError(f"categoryCreate error: {errs}")
+    return create["categoryCreate"]["category"]["id"]
+
+def get_or_create_category_hierarchy(
+    main_slug: Optional[str],
+    main_name: Optional[str],
+    sub_slug: Optional[str],
+    sub_name: Optional[str],
+    leaf_slug: Optional[str],
+    leaf_name: Optional[str],
+) -> Tuple[str, str]:
+    """Ensure category hierarchy exists and return (leaf_category_id, leaf_category_slug).
+
+    Rules:
+    - Create main (root). If sub provided, create under main. If leaf provided, create under deepest existing (sub if provided else main).
+    - If only leaf provided (no main/sub), create as root.
+    - If only main provided, and leaf provided, create leaf under main.
+    """
+    created_main_id = None
+    created_sub_id = None
+
+    # Create/resolve main
+    if main_slug:
+        try:
+            created_main_id = get_or_create_category_with_parent(main_slug, main_name, None)
+        except Exception as e:
+            print(f"Warning: failed to create/find main category '{main_slug}': {e}")
+
+    # Create/resolve sub (child of main)
+    if sub_slug:
+        parent_for_sub = created_main_id
+        try:
+            created_sub_id = get_or_create_category_with_parent(sub_slug, sub_name, parent_for_sub)
+        except Exception as e:
+            print(f"Warning: failed to create/find sub category '{sub_slug}': {e}")
+
+    # Determine leaf target parent
+    leaf_parent_id = created_sub_id or created_main_id
+
+    # If no explicit leaf slug provided, leaf is the deepest existing category
+    if not leaf_slug:
+        if created_sub_id and sub_slug:
+            return created_sub_id, sub_slug
+        if created_main_id and main_slug:
+            return created_main_id, main_slug
+        # No categories available; fallback to 'uncategorized'
+        fallback_slug = "uncategorized"
+        leaf_id = get_or_create_category_with_parent(fallback_slug, "Uncategorized", None)
+        return leaf_id, fallback_slug
+
+    # Create/resolve leaf under leaf_parent (which may be None -> root)
+    leaf_id = get_or_create_category_with_parent(leaf_slug, leaf_name, leaf_parent_id)
+    return leaf_id, leaf_slug
 
 def get_or_create_attribute(slug: str, name: Optional[str] = None, input_type: str = "DROPDOWN") -> str:
     # Check cache first
@@ -1348,15 +1434,28 @@ def bulk_create_from_csv(csv_path: str):
                 name = row["name"].strip()
                 slug = slugify(row["slug"] or name)
                 desc = row.get("description_text", "").strip()
-                # category_slug = slugify(row["category_slug"]) 
+                # Category hierarchy support for iHerb CSV
+                main_cat = row.get("main_category") or row.get("Main Category")
+                main_slug = row.get("main_category_slug") or row.get("Main Category Slug")
+                sub_cat = row.get("sub_category") or row.get("Sub Category")
+                sub_slug = row.get("sub_category_slug") or row.get("Sub Category Slug")
+                leaf_cat = row.get("category_name") or row.get("Category Name")
+                leaf_slug = row.get("category_slug") or row.get("Category Slug")
 
-                category_slug = row.get("category") or row.get("Category")
-                category_slug = slugify(category_slug) if category_slug else None
+                # Normalize slugs
+                main_slug = slugify(main_slug) if main_slug else (slugify(main_cat) if main_cat else None)
+                sub_slug = slugify(sub_slug) if sub_slug else (slugify(sub_cat) if sub_cat else None)
+                leaf_slug = slugify(leaf_slug) if leaf_slug else (slugify(leaf_cat) if leaf_cat else None)
 
-                # Fallback if missing
-                if not category_slug:
-                    # derive from product type, or use a default bucket
-                    category_slug = slugify(row.get("product_type") or row.get("Product Type") or "uncategorized")
+                # Build hierarchy and get final category id/slug
+                leaf_category_id, category_slug = get_or_create_category_hierarchy(
+                    main_slug=main_slug,
+                    main_name=main_cat,
+                    sub_slug=sub_slug,
+                    sub_name=sub_cat,
+                    leaf_slug=leaf_slug,
+                    leaf_name=leaf_cat,
+                )
 
                 collections = split_collections(row.get("collections", ""))
                 product_type_slug = slugify(row["product_type_slug"])
@@ -1466,7 +1565,9 @@ if __name__ == "__main__":
     validate_attribute_cache()
     
     # csv_file = "../../data/gear/saleor_products_ready_enriched.csv"  # adjust path if needed
-    csv_file = "../../data/gear/gear_saleor_products_ready_enriched - modifide-just_4_data.csv"  # adjust path if needed
+    # csv_file = "../../data/gear/gear_saleor_products_ready_enriched - modifide-just_4_data.csv"  # adjust path if needed
+    csv_file = "../../data/iherb/iherb_product_data - for_saleor_push_v3.csv"  # adjust path if needed
+    # csv_file = "../../data/iherb/iherb_product_data - Copy of for_saleor_push_v3.csv"  # adjust path if needed
     results = bulk_create_from_csv(csv_file)
     
     print(f"\n🎉 Done. Created {len(results)} product(s) with variants, pricing, and images.")

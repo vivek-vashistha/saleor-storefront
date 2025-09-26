@@ -22,6 +22,9 @@ START_ROW = int(os.getenv("START_ROW", "1"))  # Start from this row (1-based, in
 TOTAL_RECORDS = int(os.getenv("TOTAL_RECORDS", "0"))  # Total records to process (0 = all records)
 SKIP_HEADER = os.getenv("SKIP_HEADER", "true").lower() == "true"  # Whether to skip header row
 
+# Results output configuration
+OUTPUT_RESULTS_CSV = os.getenv("OUTPUT_RESULTS_CSV", "../../data/gear/saleor_import_results.csv")
+
 # ========= CACHING SYSTEM =========
 CACHE_DIR = "cache"
 CACHE_FILES = {
@@ -1268,6 +1271,7 @@ def bulk_create_from_csv(csv_path: str):
     # Read all rows first to calculate total and handle start row
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
+        input_headers = reader.fieldnames or []
         all_rows = list(reader)
     
     total_rows = len(all_rows)
@@ -1310,85 +1314,121 @@ def bulk_create_from_csv(csv_path: str):
     
     print(f"\n🚀 Starting processing of {actual_count} records...")
     print("=" * 60)
-    
-    for i, row in enumerate(rows_to_process, 1):
+
+    # Prepare results CSV writer (create with header if new; overwrite if header mismatches)
+    try:
+        os.makedirs(os.path.dirname(OUTPUT_RESULTS_CSV), exist_ok=True)
+    except Exception:
+        pass
+    results_file_exists = os.path.exists(OUTPUT_RESULTS_CSV) and os.path.getsize(OUTPUT_RESULTS_CSV) > 0
+    desired_headers = list(input_headers) + ["saleor_product_id", "saleor_variant_id"]
+
+    open_mode = "a"
+    need_write_header = not results_file_exists
+    if results_file_exists:
         try:
-            name = row["name"].strip()
-            slug = slugify(row["slug"] or name)
-            desc = row.get("description_text", "").strip()
-            # category_slug = slugify(row["category_slug"])
+            with open(OUTPUT_RESULTS_CSV, mode="r", newline="", encoding="utf-8") as existing_f:
+                existing_reader = csv.reader(existing_f)
+                existing_header = next(existing_reader, [])
+            if existing_header != desired_headers:
+                print("Output results header differs from desired schema. Overwriting results file with new header.")
+                open_mode = "w"
+                need_write_header = True
+        except Exception:
+            open_mode = "w"
+            need_write_header = True
 
-            category_slug = row.get("category") or row.get("Category")
-            category_slug = slugify(category_slug) if category_slug else None
+    with open(OUTPUT_RESULTS_CSV, mode=open_mode, newline="", encoding="utf-8") as out_f:
+        writer = csv.DictWriter(out_f, fieldnames=desired_headers, extrasaction="ignore")
+        if need_write_header:
+            writer.writeheader()
+        
+        for i, row in enumerate(rows_to_process, 1):
+            try:
+                name = row["name"].strip()
+                slug = slugify(row["slug"] or name)
+                desc = row.get("description_text", "").strip()
+                # category_slug = slugify(row["category_slug"]) 
 
-            # Fallback if missing
-            if not category_slug:
-                # derive from product type, or use a default bucket
-                category_slug = slugify(row.get("product_type") or row.get("Product Type") or "uncategorized")
+                category_slug = row.get("category") or row.get("Category")
+                category_slug = slugify(category_slug) if category_slug else None
 
-            collections = split_collections(row.get("collections", ""))
-            product_type_slug = slugify(row["product_type_slug"])
-            attributes_map = parse_attributes(row.get("attributes", ""))
-            rating = row.get("rating") or None
-            tax_class = row.get("tax_class") or None
-            weight = float(row["weight"]) if row.get("weight") else None
-            # price = float(row["price"]) if row.get("price") else None
-            price = parse_decimal(row.get("price") or row.get("Price"))
+                # Fallback if missing
+                if not category_slug:
+                    # derive from product type, or use a default bucket
+                    category_slug = slugify(row.get("product_type") or row.get("Product Type") or "uncategorized")
 
-            image_url = row.get("image_url", "").strip()
+                collections = split_collections(row.get("collections", ""))
+                product_type_slug = slugify(row["product_type_slug"])
+                attributes_map = parse_attributes(row.get("attributes", ""))
+                rating = row.get("rating") or None
+                tax_class = row.get("tax_class") or None
+                weight = float(row["weight"]) if row.get("weight") else None
+                # price = float(row["price"]) if row.get("price") else None
+                price = parse_decimal(row.get("price") or row.get("Price"))
 
-            print(f"\n[{i}/{actual_count}] Processing product: {name}")
-            print(f"   Product type slug: {product_type_slug}")
+                image_url = row.get("image_url", "").strip()
 
-            # 1) Create product
-            pid, pslug = create_product(
-                name=name,
-                slug=slug,
-                description_text=desc,
-                category_slug=category_slug,
-                collections_slugs=collections,
-                product_type_slug=product_type_slug,
-                attributes_map=attributes_map,
-                rating=rating,
-                tax_class=tax_class,
-                weight=weight,
-                skip_attributes=False,  # Set to True to skip attributes completely
-            )
-            print(f"   ✅ Created product: {name} -> {pid}")
+                print(f"\n[{i}/{actual_count}] Processing product: {name}")
+                print(f"   Product type slug: {product_type_slug}")
 
-            # 2) Add default variant (for pricing/purchasing)
-            vid = create_default_variant(pid, slug, weight)
-            print(f"   ✅ Variant created: {vid}")
+                # 1) Create product
+                pid, pslug = create_product(
+                    name=name,
+                    slug=slug,
+                    description_text=desc,
+                    category_slug=category_slug,
+                    collections_slugs=collections,
+                    product_type_slug=product_type_slug,
+                    attributes_map=attributes_map,
+                    rating=rating,
+                    tax_class=tax_class,
+                    weight=weight,
+                    skip_attributes=True,  # Skip attributes to bypass assignment errors
+                )
+                print(f"   ✅ Created product: {name} -> {pid}")
 
-            # 3) Assign product to channel (required before pricing)
-            set_product_channel_availability(pid, channel_id, is_published=True, is_available_for_purchase=True)
-            print(f"   ✅ Product assigned to channel '{CHANNEL_SLUG}'")
+                # 2) Add default variant (for pricing/purchasing)
+                vid = create_default_variant(pid, slug, weight)
+                print(f"   ✅ Variant created: {vid}")
 
-            # 4) Price it in channel (if price present)
-            if price is not None:
-                set_variant_price(pid, vid, channel_id, currency, price)
-                print(f"   ✅ Priced {price} {currency} in channel '{CHANNEL_SLUG}'")
-            
-            # 4.1) Always enforce stock in Default Warehouse = 100
-            set_default_warehouse_stock(vid, 100, "Default Warehouse")
-            print("   ✅ Stock set: Default Warehouse = 100")
+                # 3) Assign product to channel (required before pricing)
+                set_product_channel_availability(pid, channel_id, is_published=True, is_available_for_purchase=True)
+                print(f"   ✅ Product assigned to channel '{CHANNEL_SLUG}'")
 
-            # 5) Attach image if available
-            if image_url:
-                add_product_media(pid, image_url, alt=name)
-                print("   ✅ Image attached")
+                # 4) Price it in channel (if price present)
+                if price is not None:
+                    set_variant_price(pid, vid, channel_id, currency, price)
+                    print(f"   ✅ Priced {price} {currency} in channel '{CHANNEL_SLUG}'")
+                
+                # 4.1) Always enforce stock in Default Warehouse = 100
+                set_default_warehouse_stock(vid, 100, "Default Warehouse")
+                print("   ✅ Stock set: Default Warehouse = 100")
 
-            created.append((pid, pslug, vid))
-            
-        except Exception as e:
-            print(f"   ❌ Error processing product '{name}': {e}")
-            print("   Continuing with next product...")
-            continue
+                # 5) Attach image if available
+                if image_url:
+                    add_product_media(pid, image_url, alt=name)
+                    print("   ✅ Image attached")
+
+                # 6) Write results row immediately (mirror input row + IDs)
+                output_row = dict(row)
+                output_row["saleor_product_id"] = pid
+                output_row["saleor_variant_id"] = vid
+                writer.writerow(output_row)
+                out_f.flush()
+
+                created.append((pid, pslug, vid))
+                
+            except Exception as e:
+                print(f"   ❌ Error processing product '{name}': {e}")
+                print("   Continuing with next product...")
+                continue
     
     print(f"\n" + "=" * 60)
     print(f"🎉 Processing complete!")
     print(f"   Successfully processed: {len(created)}/{actual_count} products")
     print(f"   Failed: {actual_count - len(created)} products")
+    print(f"   Results saved to: {OUTPUT_RESULTS_CSV}")
                 
     return created
 
@@ -1425,7 +1465,8 @@ if __name__ == "__main__":
     # Validate attribute cache
     validate_attribute_cache()
     
-    csv_file = "../../data/saleor_products_ready_enriched.csv"  # adjust path if needed
+    # csv_file = "../../data/gear/saleor_products_ready_enriched.csv"  # adjust path if needed
+    csv_file = "../../data/gear/gear_saleor_products_ready_enriched - modifide-just_4_data.csv"  # adjust path if needed
     results = bulk_create_from_csv(csv_file)
     
     print(f"\n🎉 Done. Created {len(results)} product(s) with variants, pricing, and images.")

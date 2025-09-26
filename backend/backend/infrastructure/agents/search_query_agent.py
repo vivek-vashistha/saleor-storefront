@@ -1,4 +1,5 @@
 import logging
+from typing import List, Dict, Any
 
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
@@ -82,6 +83,24 @@ IMPORTANT: Use this user profile information to enhance search queries. For exam
             logger.info(f"Using user profile context: {user_profile.user_profile.get_relevant_context('general')}")
         else:
             logger.info("No user profile context available for search query generation")
+        
+        # Add memory context if available (for enhanced chat state)
+        memory_context = ""
+        if hasattr(user_profile, 'retrieved_memories') and user_profile.retrieved_memories:
+            memory_context = f"""
+
+USER MEMORY CONTEXT (Past Orders, Reviews, Preferences):
+{self._format_memories_for_search_context(user_profile.retrieved_memories)}
+
+CRITICAL: Use these past interactions to enhance search queries. Prioritize:
+- Products they've purchased before (include brand names and product types)
+- Categories they've shown interest in (probiotics, sleep aids, etc.)
+- Brands they've had positive experiences with (NOW Foods, California Gold Nutrition, etc.)
+- Specific product types they've used (capsules, powders, specific strains)
+- Health conditions they've addressed before (digestive issues, sleep problems, etc.)
+
+ALWAYS include search terms that match their past successful experiences.
+"""
 
         order_context = ""
         try:
@@ -106,10 +125,17 @@ IMPORTANT: Use this user profile information to enhance search queries. For exam
                             If a product doesn't clearly fit into one of these categories, match it to the closest category.
 
                             {user_context}
+                            {memory_context}
                             {order_context}
 
                             CRITICAL: If the user has health conditions (like diabetes, sugar problems, etc.), 
                             make sure to include health-related search terms (e.g., sugar-free, low glycemic) and consider their specific needs when generating queries.
+                            
+                            MEMORY INTEGRATION: When user memory context is available, prioritize search terms that match their past successful experiences:
+                            - Include specific brand names they've used (NOW Foods, California Gold Nutrition, etc.)
+                            - Include product types they've had positive experiences with
+                            - Include categories they've shown interest in
+                            - Include health conditions they've addressed before
                             """
 
         # Create a prompt for generating search queries with categories from conversation
@@ -127,7 +153,12 @@ IMPORTANT: Use this user profile information to enhance search queries. For exam
         )
 
         chain = prompt | self.llm.with_structured_output(SearchQueries)
-        search_queries = await chain.ainvoke({"categories_str": ", ".join(allowed_categories)})
+        search_queries = await chain.ainvoke({
+            "categories_str": ", ".join(allowed_categories),
+            "user_context": user_context,
+            "memory_context": memory_context,
+            "order_context": order_context,
+        })
         logger.info(f"Generated {len(search_queries.queries)} search queries from conversation")
 
         # Log detailed information about each search query
@@ -147,6 +178,34 @@ IMPORTANT: Use this user profile information to enhance search queries. For exam
 
         logger.info(f"Final unique search queries: {len(queries)}")
         return queries
+    
+    def _format_memories_for_search_context(self, memories: List[Dict[str, Any]]) -> str:
+        """Format retrieved memories for search context.
+        
+        Args:
+            memories: List of retrieved memories
+            
+        Returns:
+            Formatted string of memories for search context
+        """
+        if not memories:
+            return "No past interactions available"
+        
+        formatted_memories = []
+        for memory in memories[:3]:  # Limit to 3 most relevant memories
+            content = memory.get('content', '')
+            memory_type = memory.get('metadata', {}).get('memory_type', 'unknown')
+            
+            if memory_type == 'user_preference':
+                formatted_memories.append(f"• Preference: {content}")
+            elif memory_type == 'product_interaction':
+                formatted_memories.append(f"• Product Experience: {content}")
+            elif memory_type == 'order_history':
+                formatted_memories.append(f"• Past Order: {content}")
+            else:
+                formatted_memories.append(f"• {content}")
+        
+        return "\n".join(formatted_memories)
 
     async def process(self, state: ChatState) -> ChatState:
         """Process the agent state to extract multiple search queries with categories.

@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Dict, List, Optional
 from datetime import datetime
+import uuid
 from langchain_core.documents import Document
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import models as qdrant_models
@@ -59,13 +60,15 @@ class QdrantMemoryRepository(IMemoryRepository):
             
             # Generate vector ID if not provided
             if not vector_id:
-                vector_id = f"mem_{user_id}_{datetime.now().timestamp()}"
+                generated_vector_id = str(uuid.uuid4())
+            else:
+                generated_vector_id = vector_id
             
             # Store in Qdrant
-            store.add_documents([document], ids=[vector_id])
+            store.add_documents([document], ids=[generated_vector_id])
             
-            logger.info(f"Stored memory embedding for user {user_id} with ID {vector_id}")
-            return vector_id
+            logger.info(f"Stored memory embedding for user {user_id} with ID {generated_vector_id}")
+            return generated_vector_id
 
         return await self.connection.execute_db_operation(
             _store_embedding, f"Failed to store memory embedding for user {user_id}"

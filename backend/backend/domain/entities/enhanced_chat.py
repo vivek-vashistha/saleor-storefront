@@ -137,6 +137,14 @@ class EnhancedChatState(BaseModel):
         default=False,
         description="Whether memory consolidation is pending"
     )
+    retrieved_memories: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Recently retrieved memories for personalization"
+    )
+    conversation_context: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Recently retrieved conversation contexts (episodic memories)"
+    )
     
     @computed_field
     def has_search_query(self) -> bool:
@@ -334,11 +342,40 @@ class EnhancedChatState(BaseModel):
     def add_ai_message_with_product_bundles(self, bundles: List[ProductBundle]) -> None:
         """Add an AI message with product bundle recommendations."""
         from backend.domain.entities.chat import ProductBundleRecommendationMessage
+        
+        # Generate intelligent rationale for the bundles
+        rationale = self._generate_bundle_rationale(bundles)
+        
         message = ProductBundleRecommendationMessage(
-            content="Here are some product bundle recommendations for you:",
+            content=rationale,
             recommended_bundles=bundles
         )
         self.messages.append(message.model_dump())
+    
+    def _generate_bundle_rationale(self, bundles: List[ProductBundle]) -> str:
+        """Generate intelligent rationale for product bundles.
+        
+        Args:
+            bundles: List of product bundles
+            
+        Returns:
+            Compelling rationale explaining why these bundles are recommended
+        """
+        if not bundles:
+            return "Here are some product bundles based on your needs:"
+        
+        # If we have bundles with rationale, use them
+        if any(bundle.rationale for bundle in bundles):
+            rationale_parts = []
+            for i, bundle in enumerate(bundles, 1):
+                if bundle.rationale:
+                    rationale_parts.append(f"**{bundle.bundle_name or f'Bundle {i}'}**: {bundle.rationale}")
+            
+            if rationale_parts:
+                return "Based on your specific needs and preferences, I've curated these intelligent product bundles for you:\n\n" + "\n\n".join(rationale_parts)
+        
+        # Fallback to generic message
+        return "Here are some product bundles based on your needs:"
 
     def update_user_profile(self, profile_data: Dict[str, Any]) -> None:
         """Update the user profile with new information."""

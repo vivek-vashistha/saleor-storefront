@@ -238,6 +238,7 @@ class ProductService:
                 description: str = Field(description="Description of what this bundle provides")
                 product_ids: list[int] = Field(description="List of product IDs to include in this bundle")
                 reasoning: str = Field(description="Why these products work well together")
+                sales_pitch: str = Field(description="Compelling sales pitch explaining how this bundle fulfills the user's needs")
             
             class BundleSuggestions(BaseModel):
                 bundles: list[ProductBundleSuggestion] = Field(description="List of suggested bundles")
@@ -279,6 +280,12 @@ Your task is to analyze the available products and create meaningful bundles tha
 Create bundles that make sense for the user's needs, not just random groupings.
 Consider product categories, functionality, and user preferences.
 
+For each bundle, provide:
+- A compelling name that reflects the bundle's purpose
+- A clear description of what the bundle provides
+- A sales pitch that explains how this bundle specifically fulfills the user's needs
+- Reasoning for why these products work well together
+
 Respond with JSON format containing up to {max_bundles} bundle suggestions. Use this EXACT structure:
 
 {{
@@ -286,7 +293,9 @@ Respond with JSON format containing up to {max_bundles} bundle suggestions. Use 
     {{
       "bundle_name": "Bundle Name Here",
       "description": "Bundle description here",
-      "product_ids": [1, 2, 3]
+      "product_ids": [1, 2, 3],
+      "reasoning": "Why these products work well together",
+      "sales_pitch": "Compelling explanation of how this bundle fulfills the user's specific needs"
     }}
   ]
 }}
@@ -298,7 +307,7 @@ IMPORTANT: Use "bundles" as the key, not "bundle_suggestions" or any other key n
 User Profile:
 {user_context}
 
-Create intelligent product bundles that work well together and meet the user's needs.""")
+Create intelligent product bundles that work well together and meet the user's needs. For each bundle, provide a compelling sales pitch that explains how it specifically addresses the user's health conditions, preferences, and budget constraints.""")
             ])
             
             # Use the injected LLM instance or create a new one with proper API key
@@ -351,13 +360,19 @@ Create intelligent product bundles that work well together and meet the user's n
                 return self._create_fallback_bundles(products, max_bundles)
 
             for suggestion in suggestions:
-                # Extract product_ids defensively from dict or Pydantic object
+                # Extract fields defensively from dict or Pydantic object
                 if isinstance(suggestion, dict):
                     product_ids = suggestion.get("product_ids", [])
                     bundle_name = suggestion.get("bundle_name", "")
+                    description = suggestion.get("description", "")
+                    reasoning = suggestion.get("reasoning", "")
+                    sales_pitch = suggestion.get("sales_pitch", "")
                 else:
                     product_ids = getattr(suggestion, "product_ids", [])
                     bundle_name = getattr(suggestion, "bundle_name", "")
+                    description = getattr(suggestion, "description", "")
+                    reasoning = getattr(suggestion, "reasoning", "")
+                    sales_pitch = getattr(suggestion, "sales_pitch", "")
 
                 # Find the actual products by ID
                 bundle_products = []
@@ -370,10 +385,14 @@ Create intelligent product bundles that work well together and meet the user's n
                 if bundle_products:  # Only create bundle if we found the products
                     bundle = ProductBundle(
                         products=bundle_products,
-                        bundle_id=f"llm_bundle_{len(bundles) + 1}"
+                        bundle_id=f"llm_bundle_{len(bundles) + 1}",
+                        bundle_name=bundle_name,
+                        description=description,
+                        rationale=sales_pitch  # Use sales_pitch as rationale
                     )
                     bundles.append(bundle)
                     logger.info(f"Created LLM bundle: {bundle_name} with {len(bundle_products)} products")
+                    logger.info(f"Bundle rationale: {sales_pitch[:100]}...")
             
             logger.info(f"Created {len(bundles)} LLM-based intelligent bundles")
             return bundles[:max_bundles]
@@ -412,7 +431,9 @@ Create intelligent product bundles that work well together and meet the user's n
                         bundle = ProductBundle(
                             products=current_bundle,
                             bundle_id=f"budget_bundle_{len(bundles) + 1}",
-                            description=f"Complete solution within ${max_budget:.2f} budget (Total: ${current_total:.2f})"
+                            bundle_name=f"Budget-Friendly Bundle {len(bundles) + 1}",
+                            description=f"Complete solution within ${max_budget:.2f} budget (Total: ${current_total:.2f})",
+                            rationale=f"This carefully curated bundle stays within your ${max_budget:.2f} budget while providing essential products to meet your needs. Total value: ${current_total:.2f}."
                         )
                         bundles.append(bundle)
                     current_bundle = [product]
@@ -423,7 +444,9 @@ Create intelligent product bundles that work well together and meet the user's n
                 bundle = ProductBundle(
                     products=current_bundle,
                     bundle_id=f"budget_bundle_{len(bundles) + 1}",
-                    description=f"Complete solution within ${max_budget:.2f} budget (Total: ${current_total:.2f})"
+                    bundle_name=f"Budget-Friendly Bundle {len(bundles) + 1}",
+                    description=f"Complete solution within ${max_budget:.2f} budget (Total: ${current_total:.2f})",
+                    rationale=f"This carefully curated bundle stays within your ${max_budget:.2f} budget while providing essential products to meet your needs. Total value: ${current_total:.2f}."
                 )
                 bundles.append(bundle)
         
@@ -452,7 +475,9 @@ Create intelligent product bundles that work well together and meet the user's n
                 bundle = ProductBundle(
                     products=bundle_products,
                     bundle_id=f"complementary_{len(bundles) + 1}",
-                    description=description
+                    bundle_name=description,
+                    description=description,
+                    rationale=f"This complementary bundle combines products from different categories that work synergistically to provide a complete solution for your needs."
                 )
                 bundles.append(bundle)
         
@@ -471,7 +496,9 @@ Create intelligent product bundles that work well together and meet the user's n
                 bundle = ProductBundle(
                     products=bundle_products,
                     bundle_id=f"category_{category}_{len(bundles) + 1}",
-                    description=f"Complete {category.title()} Solution - Multiple Options"
+                    bundle_name=f"{category.title()} Essentials",
+                    description=f"Complete {category.title()} Solution - Multiple Options",
+                    rationale=f"This comprehensive {category.lower()} bundle offers multiple high-quality options to ensure you find the perfect solution for your specific needs."
                 )
                 bundles.append(bundle)
         
@@ -523,7 +550,9 @@ Create intelligent product bundles that work well together and meet the user's n
                 bundle = ProductBundle(
                     products=bundle_products,
                     bundle_id=f"fallback_{category}_{len(bundles) + 1}",
-                    description=f"Complete {category.title()} Solution - Multiple Options"
+                    bundle_name=f"{category.title()} Essentials",
+                    description=f"Complete {category.title()} Solution - Multiple Options",
+                    rationale=f"This bundle provides comprehensive {category.lower()} options to address your specific needs with multiple high-quality products."
                 )
                 bundles.append(bundle)
         

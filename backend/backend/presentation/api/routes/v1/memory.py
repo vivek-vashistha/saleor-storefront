@@ -318,39 +318,151 @@ async def schedule_memory_consolidation(
 @inject
 async def debug_memory_store(
     user_id: str,
-    semantic_memory_service: SemanticMemoryService = Depends(
-        Provide[Container.application.semantic_memory_service]
+    hybrid_memory_service = Depends(
+        Provide[Container.application.hybrid_memory_service]
     ),
 ) -> Dict[str, Any]:
-    """Debug endpoint to check what's actually in the InMemoryStore."""
+    """Debug endpoint to check what's actually stored in MongoDB and Qdrant."""
     try:
-        # Get all memories for the user from the store
-        all_memories = semantic_memory_service.store.search(
-            ("conversations", user_id, "memories"),
-            limit=1000
+        # Get MongoDB memories
+        mongodb_memories = await hybrid_memory_service.mongodb.get_memory_metadata(user_id)
+        
+        # Get Qdrant memories (vector search)
+        qdrant_memories = await hybrid_memory_service.qdrant.search_similar_memories(
+            user_id=user_id,
+            query="digestive health",  # Sample query to test
+            limit=100
         )
         
         # Get store statistics
         store_stats = {
-            "total_memories": len(all_memories),
             "user_id": user_id,
-            "namespace": ("conversations", user_id, "memories"),
-            "store_type": type(semantic_memory_service.store).__name__,
-            "memories": []
-        }
-        
-        # Add memory details
-        for memory in all_memories:
-            memory_info = {
-                "key": getattr(memory, 'key', 'unknown'),
-                "value": getattr(memory, 'value', {}),
-                "created_at": getattr(memory, 'created_at', None),
-                "updated_at": getattr(memory, 'updated_at', None),
-                "score": getattr(memory, 'score', None)
+            "mongodb": {
+                "total_memories": len(mongodb_memories),
+                "memories": mongodb_memories[:10]  # Show first 10 for brevity
+            },
+            "qdrant": {
+                "total_memories": len(qdrant_memories),
+                "memories": qdrant_memories[:10]  # Show first 10 for brevity
+            },
+            "summary": {
+                "total_mongodb": len(mongodb_memories),
+                "total_qdrant": len(qdrant_memories),
+                "hybrid_system": "active"
             }
-            store_stats["memories"].append(memory_info)
+        }
         
         return store_stats
         
     except Exception as e:
-        return {"error": str(e), "user_id": user_id}
+        return {"error": str(e), "user_id": user_id, "debug_info": "Hybrid memory debug failed"}
+
+
+@router.get("/debug/hybrid/{user_id}")
+@inject
+async def debug_hybrid_memory_system(
+    user_id: str,
+    hybrid_memory_service = Depends(
+        Provide[Container.application.hybrid_memory_service]
+    ),
+) -> Dict[str, Any]:
+    """Debug endpoint to test the hybrid memory system and verify storage."""
+    try:
+        # Test MongoDB connection and get user memories
+        mongodb_status = "connected"
+        mongodb_memories = []
+        try:
+            mongodb_memories = await hybrid_memory_service.mongodb.get_memory_metadata(user_id)
+        except Exception as e:
+            mongodb_status = f"error: {str(e)}"
+        
+        # Test Qdrant connection and search
+        qdrant_status = "connected"
+        qdrant_memories = []
+        try:
+            # Try a simple search to test connection
+            qdrant_memories = await hybrid_memory_service.qdrant.search_similar_memories(
+                user_id=user_id,
+                query="test",
+                limit=100
+            )
+        except Exception as e:
+            qdrant_status = f"error: {str(e)}"
+        
+        # Test memory retrieval with a sample query
+        sample_query = "digestive health"
+        relevant_memories = []
+        try:
+            relevant_memories = await hybrid_memory_service.retrieve_relevant_memories(
+                user_id=user_id,
+                query=sample_query,
+                limit=5
+            )
+        except Exception as e:
+            relevant_memories = f"error: {str(e)}"
+        
+        return {
+            "user_id": user_id,
+            "system_status": {
+                "mongodb": mongodb_status,
+                "qdrant": qdrant_status,
+                "hybrid_system": "active"
+            },
+            "memory_counts": {
+                "mongodb_memories": len(mongodb_memories),
+                "qdrant_memories": len(qdrant_memories),
+                "relevant_memories_for_query": len(relevant_memories) if isinstance(relevant_memories, list) else 0
+            },
+            "sample_data": {
+                "mongodb_sample": mongodb_memories[:3] if mongodb_memories else [],
+                "qdrant_sample": qdrant_memories[:3] if qdrant_memories else [],
+                "relevant_sample": relevant_memories[:3] if isinstance(relevant_memories, list) else relevant_memories
+            },
+            "test_query": sample_query,
+            "timestamp": "2024-01-01T00:00:00Z"
+        }
+        
+    except Exception as e:
+        return {
+            "error": str(e), 
+            "user_id": user_id, 
+            "debug_info": "Hybrid memory system test failed",
+            "system_status": "error"
+        }
+
+
+@router.post("/debug/test-storage/{user_id}")
+@inject
+async def test_memory_storage(
+    user_id: str,
+    hybrid_memory_service = Depends(
+        Provide[Container.application.hybrid_memory_service]
+    ),
+) -> Dict[str, Any]:
+    """Test endpoint to directly test memory storage."""
+    try:
+        # Try to store a simple test memory
+        test_result = await hybrid_memory_service.store_memory(
+            user_id=user_id,
+            memory_content="Test memory for debugging",
+            memory_type="test",
+            session_id="debug_session",
+            confidence=1.0,
+            importance_score=0.5,
+            additional_metadata={"test": True}
+        )
+        
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "test_result": test_result,
+            "message": "Test memory stored successfully"
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "user_id": user_id,
+            "error": str(e),
+            "message": "Test memory storage failed"
+        }

@@ -288,6 +288,72 @@ class EnhancedSearchQueryWorkflow(IChatWorkflow[EnhancedChatState]):
                 state.set_memory_components(memory_components_obj)
                 logger.info(f"[ENHANCED_WORKFLOW] Initialized memory components for user {state.user_id}")
 
+            # Retrieve relevant memories for personalization
+            if state.user_id and state.messages:
+                try:
+                    # Get the latest user message for memory retrieval
+                    latest_message = ""
+                    for msg in reversed(state.messages):
+                        if msg.get('type') == 'human':
+                            content = msg.get('content', '')
+                            if isinstance(content, list):
+                                content = ' '.join(str(item) for item in content)
+                            latest_message = str(content)
+                            break
+                    
+                    if latest_message:
+                        # Retrieve relevant memories
+                        relevant_memories = await self.semantic_memory_service.retrieve_relevant_memories(
+                            user_id=state.user_id,
+                            query=latest_message,
+                            limit=5
+                        )
+                        
+                        # Store memories in state for agent use
+                        state.retrieved_memories = relevant_memories
+                        logger.info(f"[ENHANCED_WORKFLOW] Retrieved {len(relevant_memories)} relevant memories for user {state.user_id}")
+                        
+                        # Log memory content for debugging
+                        for i, memory in enumerate(relevant_memories):
+                            logger.info(f"[ENHANCED_WORKFLOW] Memory {i+1}: {memory.get('content', 'No content')}")
+                            
+                except Exception as e:
+                    logger.error(f"[ENHANCED_WORKFLOW] Error retrieving memories for user {state.user_id}: {e}")
+                    state.retrieved_memories = []
+
+            # Retrieve conversation context (episodic memories)
+            if state.user_id and state.messages:
+                try:
+                    # Get the latest user message for conversation context retrieval
+                    latest_message = ""
+                    for msg in reversed(state.messages):
+                        if msg.get('type') == 'human':
+                            content = msg.get('content', '')
+                            if isinstance(content, list):
+                                content = ' '.join(str(item) for item in content)
+                            latest_message = str(content)
+                            break
+                    
+                    if latest_message:
+                        # Retrieve relevant conversation context using hybrid memory service
+                        conversation_context = await self.semantic_memory_service.hybrid_memory.search_conversation_context(
+                            user_id=state.user_id,
+                            query=latest_message,
+                            limit=3  # Limit to 3 most relevant conversation contexts
+                        )
+                        
+                        # Store conversation context in state for agent use
+                        state.conversation_context = conversation_context
+                        logger.info(f"[ENHANCED_WORKFLOW] Retrieved {len(conversation_context)} conversation contexts for user {state.user_id}")
+                        
+                        # Log conversation context for debugging
+                        for i, context in enumerate(conversation_context):
+                            logger.info(f"[ENHANCED_WORKFLOW] Conversation Context {i+1}: {context.get('content', 'No content')[:100]}...")
+                            
+                except Exception as e:
+                    logger.error(f"[ENHANCED_WORKFLOW] Error retrieving conversation context for user {state.user_id}: {e}")
+                    state.conversation_context = []
+
             # Process with optimized agent (single LLM call for both profile and semantic context)
             logger.debug(f"[ENHANCED_WORKFLOW] Processing unified profile and semantic context extraction")
             updated_state = await self.enhanced_user_profile_extraction_agent.process(state)

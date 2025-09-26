@@ -286,9 +286,15 @@ async def websocket_endpoint(
         logger.info(f"WebSocket disconnected for session {session_id}")
     except Exception as e:
         logger.error(f"WebSocket error for session {session_id}: {e}")
-        await manager.send_error(session_id, f"An error occurred: {str(e)}")
+        try:
+            await manager.send_error(session_id, f"An error occurred: {str(e)}")
+        except Exception as send_error:
+            logger.error(f"Failed to send error message for session {session_id}: {send_error}")
     finally:
-        manager.disconnect(websocket, session_id)
+        try:
+            manager.disconnect(websocket, session_id)
+        except Exception as disconnect_error:
+            logger.error(f"Error during WebSocket disconnect for session {session_id}: {disconnect_error}")
 
 
 @router.websocket("/test-ws")

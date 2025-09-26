@@ -260,7 +260,7 @@ class ProcessChatMessageUseCase:
                 else:
                     logger.info("LLM determined user wants individual products - getting product list")
                     products = await self.product_service.get_products_for_query(
-                        session.state.search_queries[0], max_num_results=5, user_profile=session.state.user_profile
+                        session.state.search_queries[0], max_num_results=5
                     )
 
                     if products:
@@ -645,7 +645,7 @@ Based on this context, determine if the user wants product bundles or individual
         logger = logging.getLogger("conversational_commerce")
         
         try:
-            url = os.getenv("ORDER_GRAPH_API_URL", "http://localhost:8000/v1/saleor/orders")
+            url = os.getenv("ORDER_GRAPH_API_URL", "http://localhost:4003/v1/saleor/orders")
             timeout_seconds = float(os.getenv("ORDER_GRAPH_TIMEOUT", "60"))
             
             # Prepare form data - using the exact format that works

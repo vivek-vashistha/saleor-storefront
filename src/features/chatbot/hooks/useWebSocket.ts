@@ -24,8 +24,11 @@ export const useWebSocket = (
 	const ws = useRef<WebSocket | null>(null);
 	const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const reconnectAttempts = useRef(0);
-	const maxReconnectAttempts = 5;
-	const reconnectDelay = 1000; // Start with 1 second
+	const maxReconnectAttempts = 3; // Reduced from 5 to prevent rapid cycling
+	const reconnectDelay = 2000; // Increased from 1 second to 2 seconds
+	const lastReconnectTime = useRef(0);
+	const pingInterval = useRef<NodeJS.Timeout | null>(null);
+	const PING_INTERVAL = 30000; // Ping every 30 seconds
 
 	const connect = useCallback(() => {
 		if (!sessionId) return;
@@ -42,6 +45,16 @@ export const useWebSocket = (
 				setIsConnected(true);
 				setConnectionError(null);
 				reconnectAttempts.current = 0;
+
+				// Start ping interval to keep connection alive
+				if (pingInterval.current) {
+					clearInterval(pingInterval.current);
+				}
+				pingInterval.current = setInterval(() => {
+					if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+						ws.current.send(JSON.stringify({ type: "ping" }));
+					}
+				}, PING_INTERVAL);
 			};
 
 			ws.current.onmessage = (event) => {
@@ -58,11 +71,21 @@ export const useWebSocket = (
 				console.log("WebSocket disconnected:", event.code, event.reason);
 				setIsConnected(false);
 
-				// Attempt to reconnect if not a normal closure
+				// Only attempt to reconnect if not a normal closure and we haven't exceeded max attempts
 				if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
-					const delay = reconnectDelay * Math.pow(2, reconnectAttempts.current);
+					const now = Date.now();
+					const timeSinceLastReconnect = now - lastReconnectTime.current;
+
+					// Prevent rapid reconnection attempts (minimum 5 seconds between attempts)
+					if (timeSinceLastReconnect < 5000) {
+						console.log("Too soon to reconnect, waiting...");
+						return;
+					}
+
+					const delay = Math.min(reconnectDelay * Math.pow(1.5, reconnectAttempts.current), 10000); // Cap at 10 seconds
 					console.log(`Attempting to reconnect in ${delay}ms (attempt ${reconnectAttempts.current + 1})`);
 
+					lastReconnectTime.current = now;
 					reconnectTimeoutRef.current = setTimeout(() => {
 						reconnectAttempts.current++;
 						connect();
@@ -88,6 +111,11 @@ export const useWebSocket = (
 			reconnectTimeoutRef.current = null;
 		}
 
+		if (pingInterval.current) {
+			clearInterval(pingInterval.current);
+			pingInterval.current = null;
+		}
+
 		if (ws.current) {
 			ws.current.close(1000, "Manual disconnect");
 			ws.current = null;
@@ -96,13 +124,34 @@ export const useWebSocket = (
 		setIsConnected(false);
 	}, []);
 
-	const sendMessage = useCallback((message: WebSocketMessage) => {
-		if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-			ws.current.send(JSON.stringify(message));
-		} else {
-			console.warn("WebSocket is not connected. Cannot send message:", message);
-		}
-	}, []);
+	const sendMessage = useCallback(
+		(message: WebSocketMessage) => {
+			if (!ws.current) {
+				console.warn("WebSocket is not initialized. Cannot send message:", message);
+				return;
+			}
+
+			if (ws.current.readyState === WebSocket.OPEN) {
+				try {
+					ws.current.send(JSON.stringify(message));
+				} catch (error) {
+					console.error("Error sending WebSocket message:", error);
+					setConnectionError("Failed to send message");
+				}
+			} else if (ws.current.readyState === WebSocket.CONNECTING) {
+				console.warn("WebSocket is still connecting. Message will be lost:", message);
+			} else if (ws.current.readyState === WebSocket.CLOSING) {
+				console.warn("WebSocket is closing. Message will be lost:", message);
+			} else if (ws.current.readyState === WebSocket.CLOSED) {
+				console.warn("WebSocket is closed. Attempting to reconnect...");
+				// Trigger reconnection if the connection is closed
+				if (reconnectAttempts.current < maxReconnectAttempts) {
+					connect();
+				}
+			}
+		},
+		[connect],
+	);
 
 	const reconnect = useCallback(() => {
 		disconnect();

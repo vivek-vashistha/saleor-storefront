@@ -1,4 +1,5 @@
 import logging
+from typing import List, Dict, Any
 
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -49,6 +50,41 @@ IMPORTANT: Use this user profile information to personalize your questions. For 
 - If they have experience level, tailor questions to their expertise
 """
         
+        # Add memory context if available (for enhanced chat state)
+        memory_context = ""
+        if hasattr(user_profile, 'retrieved_memories') and user_profile.retrieved_memories:
+            memory_context = f"""
+
+USER MEMORY CONTEXT (Past Orders, Reviews, Preferences):
+{self._format_memories_for_context(user_profile.retrieved_memories)}
+
+CRITICAL: You MUST explicitly reference the user's past experiences in your response. Use these exact phrases:
+- "Based on your past orders with [specific product names]..."
+- "Since you've had positive experiences with [brand/product names]..."
+- "Given your previous satisfaction with [specific products]..."
+- "I noticed you've been interested in [specific categories/products]..."
+- "Building on your past success with [product names]..."
+
+ALWAYS mention specific products, brands, or categories from their memory when relevant to the current query.
+"""
+
+        # Add conversation context if available (for enhanced chat state with episodic memories)
+        conversation_context = ""
+        if hasattr(user_profile, 'conversation_context') and user_profile.conversation_context:
+            conversation_context = f"""
+
+CONVERSATION HISTORY CONTEXT (Past Conversations):
+{self._format_conversation_context(user_profile.conversation_context)}
+
+EPISODIC MEMORY: Reference relevant past conversations naturally:
+- "In our previous conversation about [topic]..."
+- "Following up on what we discussed about [topic]..."
+- "Building on our earlier conversation..."
+- "As we talked about before regarding [topic]..."
+
+Use this context to provide continuity and avoid repeating previous discussions.
+"""
+        
         # Derive a lightweight ORDER CONTEXT from state cache or prior conversation
         order_context = ""
         try:
@@ -81,8 +117,9 @@ IMPORTANT: Use this user profile information to personalize your questions. For 
                     to better understand their needs for products.
 
                     Personalization (ALWAYS apply when USER CONTEXT is available):
-                    - Begin with a short, friendly one-sentence response that acknowledges ONE relevant detail from the USER CONTEXT (e.g., a goal like better sleep, a form preference like capsules/powders, a budget like budget-friendly, or a category preference like probiotics/magnesium). Keep it subtle; do not repeat the whole profile.
-                    - Then ask 2 concise questions tailored to the user’s context to efficiently progress toward good recommendations.
+                    - Begin with a short, friendly response that explicitly references the user's past experiences from MEMORY CONTEXT (e.g., "Based on your past orders with NOW Foods probiotics..." or "Since you've had positive experiences with California Gold Nutrition..."). Be specific about products, brands, or categories they've used before.
+                    - Then ask 2 concise questions tailored to the user's context to efficiently progress toward good recommendations.
+                    - Always mention specific products, brands, or experiences from their memory when relevant.
                     - Never reveal private/sensitive data; keep it lightweight and helpful.
 
                     Ask questions about:
@@ -95,6 +132,10 @@ IMPORTANT: Use this user profile information to personalize your questions. For 
 
                     USER CONTEXT:
                     {user_context}
+
+                    {memory_context}
+
+                    {conversation_context}
 
                     ORDER CONTEXT (past purchases, allergens, forms, brands, budgets, results, returns):
                     {order_context}
@@ -143,3 +184,56 @@ IMPORTANT: Use this user profile information to personalize your questions. For 
             return state
         except Exception as e:
             raise ServiceError(detail=f"Error in ConversationEnrichmentAgent.process: {e}")
+    
+    def _format_memories_for_context(self, memories: List[Dict[str, Any]]) -> str:
+        """Format retrieved memories for context in prompts.
+        
+        Args:
+            memories: List of retrieved memories
+            
+        Returns:
+            Formatted string of memories for context
+        """
+        if not memories:
+            return "No past interactions available"
+        
+        formatted_memories = []
+        for memory in memories[:3]:  # Limit to 3 most relevant memories
+            content = memory.get('content', '')
+            memory_type = memory.get('metadata', {}).get('memory_type', 'unknown')
+            
+            if memory_type == 'user_preference':
+                formatted_memories.append(f"• Preference: {content}")
+            elif memory_type == 'product_interaction':
+                formatted_memories.append(f"• Product Experience: {content}")
+            elif memory_type == 'order_history':
+                formatted_memories.append(f"• Past Order: {content}")
+            else:
+                formatted_memories.append(f"• {content}")
+        
+        return "\n".join(formatted_memories)
+
+    def _format_conversation_context(self, conversation_contexts: List[Dict[str, Any]]) -> str:
+        """Format retrieved conversation contexts for context in prompts.
+        
+        Args:
+            conversation_contexts: List of retrieved conversation contexts
+            
+        Returns:
+            Formatted string of conversation contexts for context
+        """
+        if not conversation_contexts:
+            return "No past conversations available"
+        
+        formatted_contexts = []
+        for context in conversation_contexts[:2]:  # Limit to 2 most relevant conversation contexts
+            content = context.get('content', '')
+            metadata = context.get('metadata', {})
+            session_id = metadata.get('session_id', 'unknown')
+            created_at = metadata.get('created_at', 'unknown')
+            
+            # Truncate content to avoid overwhelming the prompt
+            truncated_content = content[:200] + "..." if len(content) > 200 else content
+            formatted_contexts.append(f"• Previous conversation (Session: {session_id}): {truncated_content}")
+        
+        return "\n".join(formatted_contexts)

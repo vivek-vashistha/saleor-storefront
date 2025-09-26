@@ -263,11 +263,39 @@ class ChatState(BaseModel):
         Args:
             bundles: List of product bundles to recommend with this message
         """
-        # Create a message that contains the product bundles
+        # Generate intelligent rationale for the bundles
+        rationale = self._generate_bundle_rationale(bundles)
+        
+        # Create a message that contains the product bundles with rationale
         message = ProductBundleRecommendationMessage(
-            content="Here are some product bundles based on your needs:", recommended_bundles=bundles
+            content=rationale, recommended_bundles=bundles
         )
         self.messages.append(message.model_dump())
+    
+    def _generate_bundle_rationale(self, bundles: list[ProductBundle]) -> str:
+        """Generate intelligent rationale for product bundles.
+        
+        Args:
+            bundles: List of product bundles
+            
+        Returns:
+            Compelling rationale explaining why these bundles are recommended
+        """
+        if not bundles:
+            return "Here are some product bundles based on your needs:"
+        
+        # If we have bundles with rationale, use them
+        if any(bundle.rationale for bundle in bundles):
+            rationale_parts = []
+            for i, bundle in enumerate(bundles, 1):
+                if bundle.rationale:
+                    rationale_parts.append(f"**{bundle.bundle_name or f'Bundle {i}'}**: {bundle.rationale}")
+            
+            if rationale_parts:
+                return "Based on your specific needs and preferences, I've curated these intelligent product bundles for you:\n\n" + "\n\n".join(rationale_parts)
+        
+        # Fallback to generic message
+        return "Here are some product bundles based on your needs:"
 
     def update_user_profile(self, profile_updates: dict[str, Any]) -> None:
         """Update the user profile with new information.

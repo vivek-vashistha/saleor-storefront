@@ -51,6 +51,23 @@ class ConnectionManager:
                 if session_id in self.active_connections and not self.active_connections[session_id]:
                     del self.active_connections[session_id]
 
+    def is_connection_healthy(self, websocket: WebSocket) -> bool:
+        """Check if a WebSocket connection is still healthy.
+        
+        Args:
+            websocket: The WebSocket connection to check
+            
+        Returns:
+            True if the connection is healthy, False otherwise
+        """
+        try:
+            # Check if the connection has a client_state attribute and if it's disconnected
+            if hasattr(websocket, 'client_state'):
+                return websocket.client_state != websocket.client_state.DISCONNECTED
+            return True
+        except Exception:
+            return False
+
     async def send_personal_message(self, message: dict, session_id: str) -> None:
         """Send a message to all connections for a specific session.
 
@@ -65,6 +82,12 @@ class ConnectionManager:
             disconnected_connections = []
             for i, connection in enumerate(self.active_connections[session_id]):
                 try:
+                    # Check if connection is still healthy before sending
+                    if not self.is_connection_healthy(connection):
+                        logger.warning(f"[WEBSOCKET_PERSONAL] Connection {i+1} is not healthy, removing")
+                        disconnected_connections.append(connection)
+                        continue
+                    
                     logger.info(f"[WEBSOCKET_PERSONAL] Sending to connection {i+1}/{len(self.active_connections[session_id])}")
                     await connection.send_text(json.dumps(message))
                     logger.info(f"[WEBSOCKET_PERSONAL] Successfully sent message to connection {i+1}")

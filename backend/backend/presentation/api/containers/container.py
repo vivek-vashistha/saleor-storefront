@@ -12,6 +12,7 @@ class Container(containers.DeclarativeContainer):
             "backend.presentation.api.routes.v1.chat",
             "backend.presentation.api.routes.v1.session",
             "backend.presentation.api.routes.v1.memory",
+            "backend.presentation.api.routes.v1.fake_memories",
             "backend.presentation.api.routes.welcome_router",
         ]
     )

@@ -109,7 +109,7 @@ class ProcessChatMessageUseCase:
     def __init__(
         self,
         chat_session_repository: IChatSessionRepository,
-        workflow: IChatWorkflow[ChatState],
+        workflow_factory,
         product_service: ProductService,
         order_graph_service: OrderGraphService = None,
         llm=None,
@@ -118,13 +118,13 @@ class ProcessChatMessageUseCase:
 
         Args:
             chat_session_repository: Chat session repository
-            workflow: The chat workflow for processing messages
+            workflow_factory: The workflow factory for dynamic workflow selection
             product_service: Service for product-related functionality
             order_graph_service: Service for order-related graph API interactions
             llm: Language model instance for LLM operations
         """
         self.chat_session_repository = chat_session_repository
-        self.workflow = workflow
+        self.workflow_factory = workflow_factory
         self.product_service = product_service
         self.order_graph_service = order_graph_service
         self.llm = llm
@@ -206,10 +206,13 @@ class ProcessChatMessageUseCase:
             else:
                 logger.info("No user profile information available")
             
-            # Process the message with the workflow
-            workflow_name = self.workflow.__class__.__name__
+            # Get the appropriate workflow for this user
+            workflow = self.workflow_factory.get_workflow_for_user(session.user_id)
+            workflow_name = workflow.__class__.__name__
             logger.info(f"[PROCESS_CHAT] Using workflow: {workflow_name}")
-            session.state = await self.workflow.run(session.state)
+            
+            # Process the message with the selected workflow
+            session.state = await workflow.run(session.state)
             logger.info(f"[PROCESS_CHAT] Workflow {workflow_name} completed")
             
             # Log the state after LangGraph processing

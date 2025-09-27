@@ -28,8 +28,54 @@ class ConnectionManager:
         if session_id not in self.active_connections:
             self.active_connections[session_id] = []
         
+        # Check if this websocket is already connected (prevent duplicates)
+        if websocket in self.active_connections[session_id]:
+            logger.warning(f"WebSocket already connected for session {session_id}, skipping duplicate")
+            return
+        
+        # More aggressive duplicate prevention - check by websocket object identity
+        for existing_ws in self.active_connections[session_id]:
+            if existing_ws is websocket:
+                logger.warning(f"WebSocket object already exists for session {session_id}, skipping duplicate")
+                return
+        
+        # Clean up any unhealthy connections before adding new one
+        healthy_connections = []
+        for conn in self.active_connections[session_id]:
+            if self.is_connection_healthy(conn):
+                healthy_connections.append(conn)
+            else:
+                logger.info(f"Removing unhealthy connection for session {session_id}")
+        
+        self.active_connections[session_id] = healthy_connections
+        
+        # Limit connections per session to prevent too many duplicates
+        MAX_CONNECTIONS_PER_SESSION = 2  # Allow max 2 connections per session
+        
+        if len(self.active_connections[session_id]) >= MAX_CONNECTIONS_PER_SESSION:
+            logger.warning(f"Maximum connections ({MAX_CONNECTIONS_PER_SESSION}) reached for session {session_id}")
+            logger.warning(f"Closing oldest connection to make room for new one")
+            
+            # Close the oldest connection (first in list)
+            oldest_connection = self.active_connections[session_id][0]
+            try:
+                await oldest_connection.close(code=1000, reason="Too many connections")
+            except Exception as e:
+                logger.warning(f"Error closing oldest connection: {e}")
+            
+            # Remove the oldest connection
+            self.active_connections[session_id].pop(0)
+        
+        # Add the new connection
         self.active_connections[session_id].append(websocket)
-        logger.info(f"WebSocket connected for session {session_id}. Total connections: {len(self.active_connections[session_id])}")
+        
+        # Log warning if multiple connections detected
+        connection_count = len(self.active_connections[session_id])
+        if connection_count > 1:
+            logger.warning(f"Multiple WebSocket connections detected for session {session_id}: {connection_count} connections")
+            logger.warning(f"This may cause duplicate messages. Consider checking frontend connection logic.")
+        
+        logger.info(f"WebSocket connected for session {session_id}. Total connections: {connection_count}")
 
     def disconnect(self, websocket: WebSocket, session_id: str) -> None:
         """Remove a WebSocket connection.
@@ -40,16 +86,27 @@ class ConnectionManager:
         """
         if session_id in self.active_connections:
             try:
+                # Remove the specific websocket
                 self.active_connections[session_id].remove(websocket)
+                
+                # Log remaining connections
+                remaining_count = len(self.active_connections[session_id])
+                logger.info(f"WebSocket disconnected for session {session_id}. Remaining connections: {remaining_count}")
+                
+                # Clean up empty session
                 if not self.active_connections[session_id]:
                     del self.active_connections[session_id]
-                logger.info(f"WebSocket disconnected for session {session_id}")
+                    logger.info(f"Session {session_id} has no more connections, cleaned up")
+                    
             except ValueError:
                 # WebSocket was already removed or not in the list
                 logger.warning(f"WebSocket was not found in active connections for session {session_id}")
                 # Clean up empty session if it exists
                 if session_id in self.active_connections and not self.active_connections[session_id]:
                     del self.active_connections[session_id]
+                    logger.info(f"Cleaned up empty session {session_id}")
+        else:
+            logger.warning(f"Session {session_id} not found in active connections during disconnect")
 
     def is_connection_healthy(self, websocket: WebSocket) -> bool:
         """Check if a WebSocket connection is still healthy.
@@ -89,7 +146,9 @@ class ConnectionManager:
                         continue
                     
                     logger.info(f"[WEBSOCKET_PERSONAL] Sending to connection {i+1}/{len(self.active_connections[session_id])}")
-                    await connection.send_text(json.dumps(message))
+                    # Ensure proper UTF-8 encoding for Unicode characters
+                    json_message = json.dumps(message, ensure_ascii=False)
+                    await connection.send_text(json_message)
                     logger.info(f"[WEBSOCKET_PERSONAL] Successfully sent message to connection {i+1}")
                 except Exception as e:
                     logger.warning(f"[WEBSOCKET_PERSONAL] Failed to send message to WebSocket connection {i+1}: {e}")

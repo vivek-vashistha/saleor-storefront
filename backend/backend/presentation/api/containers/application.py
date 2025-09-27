@@ -26,6 +26,8 @@ from backend.application.use_cases.memory_management import (
 )
 from backend.application.workflows import SearchQueryWorkflow
 from backend.application.workflows.enhanced_search_query_workflow import EnhancedSearchQueryWorkflow
+from backend.application.workflows.deep_agents_workflow import DeepAgentsWorkflow
+from backend.application.workflows.workflow_factory import WorkflowFactory
 
 
 class ApplicationContainer(containers.DeclarativeContainer):
@@ -96,6 +98,27 @@ class ApplicationContainer(containers.DeclarativeContainer):
         order_service=order_service,
     )
 
+    deep_agents_workflow = providers.Singleton(
+        DeepAgentsWorkflow,
+        llm=llm,
+        memory_service=hybrid_memory_service,
+        product_service=product_service,
+        order_graph_service=order_graph_service,
+        agent_factory=agent_factory,
+        background_memory_manager=background_memory_manager
+    )
+
+    # Workflow Factory for dynamic workflow selection
+    workflow_factory = providers.Singleton(
+        WorkflowFactory,
+        llm=llm,
+        memory_service=hybrid_memory_service,
+        product_service=product_service,
+        order_graph_service=order_graph_service,
+        background_memory_manager=background_memory_manager,
+        agent_factory=agent_factory
+    )
+
     # Use Cases
     get_products_from_chat_use_case = providers.Factory(
         GetProductsFromChatUseCase,
@@ -158,7 +181,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     process_chat_message_use_case = providers.Factory(
         ProcessChatMessageUseCase,
         chat_session_repository=chat_session_repository,
-        workflow=enhanced_search_query_workflow,  # Changed from search_query_workflow to enhanced_search_query_workflow
+        workflow_factory=workflow_factory,  # Use workflow factory for dynamic workflow selection
         product_service=product_service,
         order_graph_service=order_graph_service,
         llm=llm,

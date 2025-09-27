@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "../../../.."
+		},
+		{
+			"path": "../../../../../deepagents"
+		}
+	],
+	"settings": {
+		"typescript.tsdk": "node_modules/typescript/lib",
+		"tailwindCSS.classAttributes": [
+			"className",
+			"clsx"
+		],
+		"files.associations": {
+			"*.css": "tailwindcss"
+		}
+	}
+}

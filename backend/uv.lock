@@ -134,11 +134,13 @@ dependencies = [
     { name = "gunicorn" },
     { name = "httpx" },
     { name = "langchain" },
+    { name = "langchain-anthropic" },
     { name = "langchain-community" },
     { name = "langchain-core" },
     { name = "langchain-openai" },
     { name = "langchain-qdrant" },
     { name = "langgraph" },
+    { name = "langgraph-prebuilt" },
     { name = "langmem" },
     { name = "motor" },
     { name = "neo4j" },
@@ -177,12 +179,14 @@ requires-dist = [
     { name = "gql", specifier = "==3.5.3" },
     { name = "gunicorn", specifier = ">=23.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "langchain", specifier = ">=0.0.335" },
+    { name = "langchain", specifier = ">=1.0.0a9" },
+    { name = "langchain-anthropic", specifier = ">=0.1.23" },
     { name = "langchain-community" },
     { name = "langchain-core", specifier = ">=0.1.0" },
     { name = "langchain-openai", specifier = ">=0.3.12" },
     { name = "langchain-qdrant", specifier = ">=0.2.0" },
     { name = "langgraph", specifier = ">=0.3.24" },
+    { name = "langgraph-prebuilt", specifier = ">=0.6.0,<0.7.0" },
     { name = "langmem", specifier = ">=0.0.29" },
     { name = "motor", specifier = ">=3.4.0" },
     { name = "neo4j", specifier = ">=5.20.0" },
@@ -730,20 +734,17 @@ wheels = [
 
 [[package]]
 name = "langchain"
-version = "0.3.27"
+version = "1.0.0a9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-core" },
     { name = "langchain-text-splitters" },
-    { name = "langsmith" },
+    { name = "langgraph" },
     { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "requests" },
-    { name = "sqlalchemy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/83/f6/f4f7f3a56626fe07e2bb330feb61254dbdf06c506e6b59a536a337da51cf/langchain-0.3.27.tar.gz", hash = "sha256:aa6f1e6274ff055d0fd36254176770f356ed0a8994297d1df47df341953cec62", size = 10233809, upload-time = "2025-07-24T14:42:32.959Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b0/30/3feeaf04077079c48d09fc77e3469ea4b090ced9c4d47f136dd255f82559/langchain-1.0.0a9.tar.gz", hash = "sha256:22f3695337502daed7b35de4b3591c6427f8fc7dc99d343f6fb3620a4e4016a5", size = 107622, upload-time = "2025-09-24T21:06:01.95Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f6/d5/4861816a95b2f6993f1360cfb605aacb015506ee2090433a71de9cca8477/langchain-0.3.27-py3-none-any.whl", hash = "sha256:7b20c4f338826acb148d885b20a73a16e410ede9ee4f19bb02011852d5f98798", size = 1018194, upload-time = "2025-07-24T14:42:30.23Z" },
+    { url = "https://files.pythonhosted.org/packages/49/90/a826ccb05598eaca38f61bcd67575c18bc169c1f07e9c25c88a979611da9/langchain-1.0.0a9-py3-none-any.whl", hash = "sha256:915db2fb7f7547937ae37a1e9c13177db683be6298395089f8d6cc49c11c69dc", size = 71486, upload-time = "2025-09-24T21:06:00.503Z" },
 ]
 
 [[package]]

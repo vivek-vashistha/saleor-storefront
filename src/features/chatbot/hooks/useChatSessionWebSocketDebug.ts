@@ -53,6 +53,9 @@ export const useChatSessionWebSocketDebug = ({
 	const [streamingMessage, setStreamingMessage] = useState<string>("");
 	const [isStreaming, setIsStreaming] = useState(false);
 
+	// Use ref to track accumulated chunks to avoid race conditions
+	const accumulatedChunksRef = useRef<string>("");
+
 	// Product-related state
 	const [allBundles, setAllBundles] = useState<any[]>([]);
 	const [productSuggestions, setProductSuggestions] = useState<any[]>([]);
@@ -103,6 +106,14 @@ export const useChatSessionWebSocketDebug = ({
 					break;
 
 				case "message_chunk":
+					console.log("🔍 Frontend Debug: Received message_chunk:", {
+						chunk: message.chunk,
+						is_final: message.is_final,
+						current_streaming: streamingMessage,
+						accumulated_ref: accumulatedChunksRef.current,
+						chunk_length: message.chunk?.length || 0,
+					});
+
 					if (message.is_final) {
 						// Final chunk - handle both string and array content
 						const currentTimestamp = new Date().toISOString();
@@ -119,8 +130,16 @@ export const useChatSessionWebSocketDebug = ({
 								console.log(`🔔 Final message content ${index + 1}:`, chunkItem);
 							});
 						} else {
-							// Single string chunk - create one message
-							const completeContent = streamingMessage + message.chunk;
+							// Single string chunk - create one message with ALL accumulated content
+							// Use the ref to get the complete accumulated content
+							const completeContent = accumulatedChunksRef.current + message.chunk;
+							console.log("🔍 Frontend Debug: Final chunk processing:", {
+								accumulated_ref: accumulatedChunksRef.current,
+								final_chunk: message.chunk,
+								complete_content: completeContent,
+								complete_length: completeContent.length,
+							});
+
 							const botMessage: Message = {
 								type: "bot",
 								content: completeContent,
@@ -130,14 +149,25 @@ export const useChatSessionWebSocketDebug = ({
 							console.log("🔔 Final message content:", completeContent);
 						}
 
+						// Reset streaming state and ref
 						setStreamingMessage("");
+						accumulatedChunksRef.current = "";
 						setIsStreaming(false);
 						setCurrentThinking(null);
 						setToolCalls([]);
 						setIsLoading(false); // Stop loading when message is complete
 					} else {
-						// Intermediate chunk - accumulate
-						setStreamingMessage((prev) => prev + message.chunk);
+						// Intermediate chunk - accumulate using ref to avoid race conditions
+						console.log("🔍 Frontend Debug: Intermediate chunk:", {
+							chunk: message.chunk,
+							previous_accumulated: accumulatedChunksRef.current,
+							new_accumulated: accumulatedChunksRef.current + message.chunk,
+						});
+
+						// Update both ref and state
+						accumulatedChunksRef.current += message.chunk;
+						setStreamingMessage(accumulatedChunksRef.current);
+
 						if (!isStreaming) {
 							setIsStreaming(true);
 						}

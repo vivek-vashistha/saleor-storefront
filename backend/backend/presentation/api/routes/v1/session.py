@@ -279,6 +279,8 @@ async def websocket_endpoint(
                     process_chat_message_use_case=process_chat_message_use_case,
                     get_chat_session_use_case=get_chat_session_use_case
                 )
+                # Continue the loop to handle the next message
+                # The WebSocket should stay connected for the entire chat session
             else:
                 logger.warning(f"Unknown message type: {message_data.get('type')}")
                 
@@ -308,7 +310,7 @@ async def test_websocket_endpoint(websocket: WebSocket):
             "type": "welcome",
             "message": "WebSocket connection established!",
             "timestamp": manager._get_timestamp()
-        }))
+        }, ensure_ascii=False))
         
         while True:
             # Receive message from client
@@ -320,7 +322,7 @@ async def test_websocket_endpoint(websocket: WebSocket):
                 await websocket.send_text(json.dumps({
                     "type": "pong",
                     "timestamp": manager._get_timestamp()
-                }))
+                }, ensure_ascii=False))
                 continue
             
             # Echo back the message
@@ -328,7 +330,7 @@ async def test_websocket_endpoint(websocket: WebSocket):
                 "type": "echo",
                 "original_message": message_data,
                 "timestamp": manager._get_timestamp()
-            }))
+            }, ensure_ascii=False))
                 
     except WebSocketDisconnect:
         logger.info("Test WebSocket disconnected")
@@ -338,7 +340,7 @@ async def test_websocket_endpoint(websocket: WebSocket):
             "type": "error",
             "error": str(e),
             "timestamp": manager._get_timestamp()
-        }))
+        }, ensure_ascii=False))
 
 
 async def process_message_with_websocket(
@@ -439,9 +441,7 @@ async def process_message_with_websocket(
                         logger.info(f"[WEBSOCKET] Sending chunk {j//chunk_size + 1}/{total_chunks}: '{chunk}', is_final={is_final}")
                         await manager.send_message_chunk(session_id, chunk, is_final)
                         
-                        # Small delay for streaming effect
-                        import asyncio
-                        await asyncio.sleep(0.05)
+                        # No delay needed - let the frontend handle the streaming effect
                 else:
                     logger.warning(f"[WEBSOCKET] Bot message has empty content, skipping chunk sending")
                 

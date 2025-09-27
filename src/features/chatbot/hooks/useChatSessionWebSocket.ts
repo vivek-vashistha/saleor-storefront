@@ -50,6 +50,9 @@ export const useChatSessionWebSocket = ({ onMaximize, isMaximized }: UseChatSess
 	const [streamingMessage, setStreamingMessage] = useState<string>("");
 	const [isStreaming, setIsStreaming] = useState(false);
 
+	// Use ref to track accumulated chunks to avoid race conditions
+	const accumulatedChunksRef = useRef<string>("");
+
 	// Product-related state
 	const [allBundles, setAllBundles] = useState<any[]>([]);
 	const [productSuggestions, setProductSuggestions] = useState<any[]>([]);
@@ -91,6 +94,14 @@ export const useChatSessionWebSocket = ({ onMaximize, isMaximized }: UseChatSess
 					break;
 
 				case "message_chunk":
+					console.log("🔍 Frontend: Received message_chunk:", {
+						chunk: message.chunk,
+						is_final: message.is_final,
+						current_streaming: streamingMessage,
+						accumulated_ref: accumulatedChunksRef.current,
+						chunk_length: message.chunk?.length || 0,
+					});
+
 					if (message.is_final) {
 						// Final chunk - handle both string and array content
 						const currentTimestamp = new Date().toISOString();
@@ -106,8 +117,16 @@ export const useChatSessionWebSocket = ({ onMaximize, isMaximized }: UseChatSess
 								setMessages((prev) => [...prev, botMessage]);
 							});
 						} else {
-							// Single string chunk - create one message
-							const completeContent = streamingMessage + message.chunk;
+							// Single string chunk - create one message with ALL accumulated content
+							// Use the ref to get the complete accumulated content
+							const completeContent = accumulatedChunksRef.current + message.chunk;
+							console.log("🔍 Frontend: Final chunk processing:", {
+								accumulated_ref: accumulatedChunksRef.current,
+								final_chunk: message.chunk,
+								complete_content: completeContent,
+								complete_length: completeContent.length,
+							});
+
 							const botMessage: Message = {
 								type: "bot",
 								content: completeContent,
@@ -116,13 +135,24 @@ export const useChatSessionWebSocket = ({ onMaximize, isMaximized }: UseChatSess
 							setMessages((prev) => [...prev, botMessage]);
 						}
 
+						// Reset streaming state and ref
 						setStreamingMessage("");
+						accumulatedChunksRef.current = "";
 						setIsStreaming(false);
 						setCurrentThinking(null);
 						setToolCalls([]);
 					} else {
-						// Intermediate chunk - accumulate
-						setStreamingMessage((prev) => prev + message.chunk);
+						// Intermediate chunk - accumulate using ref to avoid race conditions
+						console.log("🔍 Frontend: Intermediate chunk:", {
+							chunk: message.chunk,
+							previous_accumulated: accumulatedChunksRef.current,
+							new_accumulated: accumulatedChunksRef.current + message.chunk,
+						});
+
+						// Update both ref and state
+						accumulatedChunksRef.current += message.chunk;
+						setStreamingMessage(accumulatedChunksRef.current);
+
 						if (!isStreaming) {
 							setIsStreaming(true);
 						}

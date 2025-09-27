@@ -161,7 +161,13 @@ class HybridMemoryService:
             
             # Get memory statistics from both stores
             mongodb_stats = await self.mongodb.get_memory_stats(user_id)
-            qdrant_stats = await self.qdrant.get_memory_stats(user_id)
+            
+            # Get Qdrant stats with error handling (collection might not exist)
+            try:
+                qdrant_stats = await self.qdrant.get_memory_stats(user_id)
+            except Exception as e:
+                logger.warning(f"Could not get Qdrant stats for user {user_id}: {e}")
+                qdrant_stats = {"total_memories": 0, "error": str(e)}
             
             profile_data = {
                 "user_id": user_id,

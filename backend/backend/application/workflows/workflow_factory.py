@@ -16,7 +16,8 @@ from backend.application.services.product_service import ProductService
 from backend.application.services.order_graph_service import OrderGraphService
 from backend.application.services.background_memory_manager import BackgroundMemoryManager
 from backend.application.workflows.enhanced_search_query_workflow import EnhancedSearchQueryWorkflow
-from backend.application.workflows.deep_agents_workflow import DeepAgentsWorkflow
+from backend.application.agents.conversational_commerce_deep_agent import ConversationalCommerceDeepAgent
+from backend.application.workflows.simplified_deep_agents_workflow import SimplifiedDeepAgentsWorkflow
 from backend.settings.deep_agents import deep_agents_config
 
 logger = logging.getLogger("conversational_commerce.workflow_factory")
@@ -78,14 +79,16 @@ class WorkflowFactory:
                 agent_factory=self.agent_factory
             )
             
-            # Initialize Deep Agents workflow with SemanticMemoryService
-            self.deep_agents_workflow = DeepAgentsWorkflow(
+            # Initialize Deep Agent
+            deep_agent = ConversationalCommerceDeepAgent(
                 llm=self.llm,
                 memory_service=semantic_memory_service,
                 product_service=self.product_service,
-                order_graph_service=self.order_graph_service,
-                background_memory_manager=self.background_memory_manager
+                order_graph_service=self.order_graph_service
             )
+            
+            # Initialize simplified Deep Agents workflow
+            self.deep_agents_workflow = SimplifiedDeepAgentsWorkflow(deep_agent)
             
             logger.info("Workflows initialized successfully")
             

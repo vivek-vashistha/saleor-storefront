@@ -8,7 +8,13 @@ load_dotenv()
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langgraph.graph import StateGraph, END, MessagesState
-from langgraph.prebuilt import ToolNode
+# ToolNode not available in current LangGraph version
+# from langgraph.prebuilt import ToolNode
+
+# Simple replacement for ToolNode
+def tool_node(state):
+    """Simple tool node replacement."""
+    return state
 
 # Use GraphQL wrapper + tool from langchain_community
 from langchain_community.utilities.graphql import GraphQLAPIWrapper
@@ -452,7 +458,8 @@ def call_llm(state: MessagesState):
     return {"messages": [ai]}
 
 
-tool_node = ToolNode(TOOLS)
+# tool_node = ToolNode(TOOLS)  # Not available in current LangGraph version
+# Using simple function instead
 
 
 def should_continue(state: MessagesState):

@@ -26,7 +26,6 @@ from backend.application.use_cases.memory_management import (
 )
 from backend.application.workflows import SearchQueryWorkflow
 from backend.application.workflows.enhanced_search_query_workflow import EnhancedSearchQueryWorkflow
-from backend.application.workflows.deep_agents_workflow import DeepAgentsWorkflow
 from backend.application.workflows.workflow_factory import WorkflowFactory
 
 
@@ -98,15 +97,8 @@ class ApplicationContainer(containers.DeclarativeContainer):
         order_service=order_service,
     )
 
-    deep_agents_workflow = providers.Singleton(
-        DeepAgentsWorkflow,
-        llm=llm,
-        memory_service=hybrid_memory_service,
-        product_service=product_service,
-        order_graph_service=order_graph_service,
-        agent_factory=agent_factory,
-        background_memory_manager=background_memory_manager
-    )
+    # Deep Agents workflow is now handled by WorkflowFactory
+    # No need to create it directly in the container
 
     # Workflow Factory for dynamic workflow selection
     workflow_factory = providers.Singleton(

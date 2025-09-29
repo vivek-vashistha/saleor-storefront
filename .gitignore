@@ -64,3 +64,6 @@ env.bak/
 .venv
 venv
 .langgraph_api
+
+
+backend/scripts/load_products_to_neo4j_new.py

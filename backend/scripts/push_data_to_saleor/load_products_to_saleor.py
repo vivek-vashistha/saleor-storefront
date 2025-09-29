@@ -24,7 +24,7 @@ SKIP_HEADER = os.getenv("SKIP_HEADER", "true").lower() == "true"  # Whether to s
 
 # Results output configuration
 # OUTPUT_RESULTS_CSV = os.getenv("OUTPUT_RESULTS_CSV", "../../data/gear/saleor_import_results.csv")
-OUTPUT_RESULTS_CSV = os.getenv("OUTPUT_RESULTS_CSV", "../../data/iherb/iherb_product_data - for_Neo4j_push_v3_with_saleor_ID.csv")
+OUTPUT_RESULTS_CSV = os.getenv("OUTPUT_RESULTS_CSV", "../../data/iherb_data_for_neo4j/iherb_product_data - for_Neo4j_push_v3_with_saleor_ID.csv")
 
 # ========= CACHING SYSTEM =========
 CACHE_DIR = "cache"

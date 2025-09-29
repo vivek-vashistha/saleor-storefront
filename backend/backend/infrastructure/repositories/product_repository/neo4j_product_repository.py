@@ -48,98 +48,284 @@ class Neo4jProductRepository(IProductRepository):
                 size([(node)-[:IN_COLLECTION]->(col:Collection) | col]) as collection_count
         """
 
+    # async def insert_products(self, products: list[Product]) -> None:
+    #     """Initialize the product repository from a list of products with enhanced graph relationships.
+
+    #     Args:
+    #         products: List of Product objects.
+
+    #     """
+    #     def _operation(driver: neo4j.Driver):
+    #         with driver.session() as session:
+    #             # Create indexes if they don't exist
+    #             self._create_vector_index(session)
+    #             self._create_fulltext_index(session)
+    #             self._create_constraints(session)
+                
+    #             # Process products in batches
+    #             total_products = len(products)
+    #             batches = math.ceil(total_products / self.batch_size)
+                
+    #             logger.info(f"Processing {total_products} products in {batches} batches of {self.batch_size}")
+                
+    #             for batch_idx in range(batches):
+    #                 start_idx = batch_idx * self.batch_size
+    #                 end_idx = min(start_idx + self.batch_size, total_products)
+    #                 batch_products = products[start_idx:end_idx]
+                    
+    #                 logger.info(f"Processing batch {batch_idx + 1}/{batches} (products {start_idx + 1}-{end_idx})")
+                    
+    #                 # Create batch transaction
+    #                 with session.begin_transaction() as tx:
+    #                     # 1. Create Product nodes first (they need to exist before relationships)
+    #                     self._create_products_batch(tx, batch_products)
+                        
+    #                     # 2. Create Category nodes and BELONGS_TO relationships
+    #                     self._create_categories_batch(tx, batch_products)
+                        
+    #                     # 3. Create Collection nodes and IN_COLLECTION relationships  
+    #                     self._create_collections_batch(tx, batch_products)
+                        
+    #                     # 4. Create attribute relationships
+    #                     self._create_attribute_relationships_batch(tx, batch_products)
+                        
+    #                     # 5. Create attribute relationships
+    #                     self._create_attribute_relationships_batch(tx, batch_products)
+                    
+    #                 logger.info(f"Completed batch {batch_idx + 1}/{batches}")
+                
+    #             logger.info(f"Successfully initialized {total_products} products with graph relationships in Neo4j")
+    #             return total_products
+
+    #     return await asyncio.get_event_loop().run_in_executor(
+    #         None, 
+    #         self.connection.execute_db_operation,
+    #         _operation, 
+    #         "Failed to initialize products in Neo4j"
+    #     )
+        
     async def insert_products(self, products: list[Product]) -> None:
-        """Initialize the product repository from a list of products with enhanced graph relationships.
-
-        Args:
-            products: List of Product objects.
-
-        """
+        """Upsert products with 3-level categories and AttrValues."""
         def _operation(driver: neo4j.Driver):
             with driver.session() as session:
-                # Create indexes if they don't exist
-                self._create_vector_index(session)
-                self._create_fulltext_index(session)
                 self._create_constraints(session)
-                
-                # Process products in batches
-                total_products = len(products)
-                batches = math.ceil(total_products / self.batch_size)
-                
-                logger.info(f"Processing {total_products} products in {batches} batches of {self.batch_size}")
-                
-                for batch_idx in range(batches):
-                    start_idx = batch_idx * self.batch_size
-                    end_idx = min(start_idx + self.batch_size, total_products)
-                    batch_products = products[start_idx:end_idx]
-                    
-                    logger.info(f"Processing batch {batch_idx + 1}/{batches} (products {start_idx + 1}-{end_idx})")
-                    
-                    # Create batch transaction
+
+                total = len(products)
+                batches = math.ceil(total / self.batch_size)
+                logger.info(f"Processing {total} rows in {batches} batches")
+
+                for i in range(batches):
+                    batch = products[i * self.batch_size : (i + 1) * self.batch_size]
                     with session.begin_transaction() as tx:
-                        # 1. Create Product nodes first (they need to exist before relationships)
-                        self._create_products_batch(tx, batch_products)
-                        
-                        # 2. Create Category nodes and BELONGS_TO relationships
-                        self._create_categories_batch(tx, batch_products)
-                        
-                        # 3. Create Collection nodes and IN_COLLECTION relationships  
-                        self._create_collections_batch(tx, batch_products)
-                        
-                        # 4. Create attribute relationships
-                        self._create_attribute_relationships_batch(tx, batch_products)
-                        
-                        # 5. Create attribute relationships
-                        self._create_attribute_relationships_batch(tx, batch_products)
-                    
-                    logger.info(f"Completed batch {batch_idx + 1}/{batches}")
-                
-                logger.info(f"Successfully initialized {total_products} products with graph relationships in Neo4j")
-                return total_products
+                        self._create_products_batch(tx, batch)
+                        self._create_categories_batch(tx, batch)
+                        self._create_attr_values_batch(tx, batch)
+
+                logger.info(f"Inserted/updated {total} products")
+                return total
 
         return await asyncio.get_event_loop().run_in_executor(
-            None, 
+            None,
             self.connection.execute_db_operation,
-            _operation, 
-            "Failed to initialize products in Neo4j"
+            _operation,
+            "Failed to initialize products in Neo4j",
         )
 
-    def _create_categories_batch(self, tx, products: List[Product]) -> None:
-        """Create Category nodes and BELONGS_TO relationships in batch."""
-        # Extract unique categories
-        categories = set()
-        category_products = {}
+
+    # def _create_categories_batch(self, tx, products: List[Product]) -> None:
+    #     """Create Category nodes and BELONGS_TO relationships in batch."""
+    #     # Extract unique categories
+    #     categories = set()
+    #     category_products = {}
         
-        for product in products:
-            if product.category:
-                categories.add(product.category)
-                if product.category not in category_products:
-                    category_products[product.category] = []
-                category_products[product.category].append(product.product_id)
+    #     for product in products:
+    #         if product.category:
+    #             categories.add(product.category)
+    #             if product.category not in category_products:
+    #                 category_products[product.category] = []
+    #             category_products[product.category].append(product.product_id)
         
-        # Create Category nodes
-        for category in categories:
-            tx.run("""
-                MERGE (c:Category {name: $category})
-                SET c.slug = $slug,
-                    c.product_count = size([(c)<-[:BELONGS_TO]-(p:Product) | p]) + $new_count
-            """, {
-                'category': category,
-                'slug': self._slugify(category),
-                'new_count': len(category_products[category])
-            })
+    #     # Create Category nodes
+    #     for category in categories:
+    #         tx.run("""
+    #             MERGE (c:Category {name: $category})
+    #             SET c.slug = $slug,
+    #                 c.product_count = size([(c)<-[:BELONGS_TO]-(p:Product) | p]) + $new_count
+    #         """, {
+    #             'category': category,
+    #             'slug': self._slugify(category),
+    #             'new_count': len(category_products[category])
+    #         })
         
-        # Create BELONGS_TO relationships
-        for category, product_ids in category_products.items():
-            for product_id in product_ids:
-                tx.run("""
-                    MATCH (p:Product {product_id: $product_id})
-                    MATCH (c:Category {name: $category})
-                    MERGE (p)-[:BELONGS_TO]->(c)
-                """, {
-                    'product_id': product_id,
-                    'category': category
-                })
+    #     # Create BELONGS_TO relationships
+    #     for category, product_ids in category_products.items():
+    #         for product_id in product_ids:
+    #             tx.run("""
+    #                 MATCH (p:Product {product_id: $product_id})
+    #                 MATCH (c:Category {name: $category})
+    #                 MERGE (p)-[:BELONGS_TO]->(c)
+    #             """, {
+    #                 'product_id': product_id,
+    #                 'category': category
+    #             })
+    
+    def _create_categories_batch(self, tx, products: list[Product]) -> None:
+        """Create 3-level categories and link products to leaf Category."""
+        for p in products:
+            if not p.category_slug and not p.category_name:
+                continue
+
+            # tx.run(
+            #     """
+            #     // Create/Upsert the three levels
+            #     MERGE (mc:MainCategory {code: coalesce($main_slug, $main_name)})
+            #     ON CREATE SET mc.name = $main_name
+            #     SET mc.name = coalesce($main_name, mc.name)
+
+            #     MERGE (sc:SubCategory {code: coalesce($sub_slug, $sub_name)})
+            #     ON CREATE SET sc.name = $sub_name
+            #     SET sc.name = coalesce($sub_name, sc.name)
+
+            #     MERGE (c:Category {code: coalesce($cat_slug, $cat_name)})
+            #     ON CREATE SET c.name = $cat_name
+            #     SET c.name = coalesce($cat_name, c.name)
+
+            #     MERGE (c)-[:CHILD_OF]->(sc)
+            #     MERGE (sc)-[:CHILD_OF]->(mc)
+
+            #     MATCH (prod:Product {productId: $product_id})
+            #     MERGE (prod)-[:IN_CATEGORY]->(c)
+            #     """,
+            #     {
+            #         "product_id": p.product_id,
+            #         "main_slug": p.main_category_slug,
+            #         "main_name": p.main_category,
+            #         "sub_slug": p.sub_category_slug,
+            #         "sub_name": p.sub_category,
+            #         "cat_slug": p.category_slug,
+            #         "cat_name": p.category_name,
+            #     },
+            # )
+            tx.run(
+                """
+                // Compute codes/names up front (treat empty strings as null)
+                WITH
+                CASE WHEN $main_slug IS NOT NULL AND $main_slug <> '' THEN $main_slug ELSE $main_name END AS mc_code,
+                $main_name AS mc_name,
+                CASE WHEN $sub_slug  IS NOT NULL AND $sub_slug  <> '' THEN $sub_slug  ELSE $sub_name  END AS sc_code,
+                $sub_name  AS sc_name,
+                CASE WHEN $cat_slug  IS NOT NULL AND $cat_slug  <> '' THEN $cat_slug  ELSE $cat_name  END AS c_code,
+                $cat_name  AS c_name,
+                $product_id AS pid
+
+                // Require a leaf Category code
+                WHERE c_code IS NOT NULL AND c_code <> ''
+
+                // Category (leaf)
+                MERGE (c:Category {code: c_code})
+                ON CREATE SET c.name = c_name
+                SET c.name = coalesce(c_name, c.name)
+
+                // If MainCategory code exists, create it and attach
+                FOREACH (_ IN CASE WHEN mc_code IS NOT NULL AND mc_code <> '' THEN [1] ELSE [] END |
+                MERGE (mc:MainCategory {code: mc_code})
+                    ON CREATE SET mc.name = mc_name
+                    SET mc.name = coalesce(mc_name, mc.name)
+
+                // If SubCategory code exists, create sc and chain c->sc->mc
+                FOREACH (__ IN CASE WHEN sc_code IS NOT NULL AND sc_code <> '' THEN [1] ELSE [] END |
+                    MERGE (sc:SubCategory {code: sc_code})
+                    ON CREATE SET sc.name = sc_name
+                    SET sc.name = coalesce(sc_name, sc.name)
+                    MERGE (c)-[:CHILD_OF]->(sc)
+                    MERGE (sc)-[:CHILD_OF]->(mc)
+                )
+
+                // Else (no sub), link c directly to mc
+                FOREACH (__ IN CASE WHEN sc_code IS NULL OR sc_code = '' THEN [1] ELSE [] END |
+                    MERGE (c)-[:CHILD_OF]->(mc)
+                )
+                )
+
+                // Finally, link Product to the leaf Category
+                WITH c, pid
+                MATCH (prod:Product {productId: pid})
+                MERGE (prod)-[:IN_CATEGORY]->(c)
+                """,
+                {
+                    "product_id": p.product_id,
+                    "main_slug": p.main_category_slug,
+                    "main_name": p.main_category,
+                    "sub_slug":  p.sub_category_slug,
+                    "sub_name":  p.sub_category,
+                    "cat_slug":  p.category_slug,
+                    "cat_name":  p.category_name,
+                },
+            )
+
+
+
+    def _create_attr_values_batch(self, tx, products: list[Product]) -> None:
+        """
+        Create Attribute & AttrValue nodes and link them to the Variant.
+        Only values present in the CSV are created.
+        """
+        for p in products:
+            key_to_value = [
+                ("review_score", p.review_score, "num"),
+                ("review_count", p.review_count, "num"),
+                ("product_type_name", p.product_type_name, "str"),
+                ("product_type_slug", p.product_type_slug, "str"),
+                ("tax_class", p.tax_class, "str"),
+                ("collections", p.collections, "str"),
+                ("breadcrumbs", "|".join(p.breadcrumbs) if p.breadcrumbs else None, "str"),
+                ("short_description", p.short_description, "str"),
+                ("description_text", p.description_text, "str"),
+            ]
+
+            # best_for is a list: create one AttrValue per item
+            for bf in (p.best_for or []):
+                tx.run(
+                    """
+                    MERGE (a:Attribute {key: 'best_for'})
+                    CREATE (av:AttrValue {key:'best_for', value_str:$val, norm: toLower($val), confidence: 1.0})
+                    WITH a, av
+                    MATCH (v:Variant {variantId: $variant_id})
+                    MERGE (v)-[:HAS_ATTR]->(av)
+                    MERGE (av)-[:OF]->(a)
+                    """,
+                    {"variant_id": p.variant_id, "val": bf},
+                )
+
+            # scalar attributes
+            for key, val, typ in key_to_value:
+                if val in (None, "", []):
+                    continue
+
+                tx.run(
+                    """
+                    MERGE (a:Attribute {key: $key})
+                    CREATE (av:AttrValue {
+                        key:$key,
+                        value_str: CASE WHEN $type='str' THEN $s END,
+                        value_num: CASE WHEN $type='num' THEN $n END,
+                        confidence: 1.0
+                    })
+                    WITH a, av
+                    MATCH (v:Variant {variantId: $variant_id})
+                    MERGE (v)-[:HAS_ATTR]->(av)
+                    MERGE (av)-[:OF]->(a)
+                    """,
+                    {
+                        "key": key,
+                        "type": typ,
+                        "s": str(val) if typ == "str" else None,
+                        "n": float(val) if typ == "num" else None,
+                        "variant_id": p.variant_id,
+                    },
+                )
+
+
 
     def _create_collections_batch(self, tx, products: List[Product]) -> None:
         """Create Collection nodes and IN_COLLECTION relationships in batch."""
@@ -177,45 +363,84 @@ class Neo4jProductRepository(IProductRepository):
                     'collection': collection
                 })
 
-    def _create_products_batch(self, tx, products: List[Product]) -> None:
-        """Create Product nodes with attributes in batch."""
-        for product in products:
-            # Create product node
-            cypher_query = """
-            MERGE (p:Product {product_id: $product_id})
-            SET p.name = $name,
-                p.price = $price,
-                p.category = $category,
-                p.description = $description,
-                p.review_score = $review_score,
-                p.best_for = $best_for,
-                p.image_url = $image_url,
-                p.breadcrumbs = $breadcrumbs,
-                p.created_at = datetime(),
-                p.updated_at = datetime()
-            """
+    # def _create_products_batch(self, tx, products: List[Product]) -> None:
+    #     """Create Product nodes with attributes in batch."""
+    #     for product in products:
+    #         # Create product node
+    #         cypher_query = """
+    #         MERGE (p:Product {product_id: $product_id})
+    #         SET p.name = $name,
+    #             p.price = $price,
+    #             p.category = $category,
+    #             p.description = $description,
+    #             p.review_score = $review_score,
+    #             p.best_for = $best_for,
+    #             p.image_url = $image_url,
+    #             p.breadcrumbs = $breadcrumbs,
+    #             p.created_at = datetime(),
+    #             p.updated_at = datetime()
+    #         """
             
-            params = {
-                'product_id': product.product_id,
-                'name': product.name,
-                'price': product.price,
-                'category': product.category,
-                'description': product.description,
-                'review_score': product.review_score,
-                'best_for': product.best_for,
-                'image_url': product.image_url,
-                'breadcrumbs': product.breadcrumbs
-            }
+    #         params = {
+    #             'product_id': product.product_id,
+    #             'name': product.name,
+    #             'price': product.price,
+    #             'category': product.category,
+    #             'description': product.description,
+    #             'review_score': product.review_score,
+    #             'best_for': product.best_for,
+    #             'image_url': product.image_url,
+    #             'breadcrumbs': product.breadcrumbs
+    #         }
             
-            # Add embedding if it exists
-            if product.embedding:
-                cypher_query = cypher_query.replace(
-                    "p.updated_at = datetime()",
-                    "p.updated_at = datetime(), p.embedding = $embedding"
+    #         # Add embedding if it exists
+    #         if product.embedding:
+    #             cypher_query = cypher_query.replace(
+    #                 "p.updated_at = datetime()",
+    #                 "p.updated_at = datetime(), p.embedding = $embedding"
+    #             )
+    #             params['embedding'] = product.embedding
+            
+    #         tx.run(cypher_query, params)
+
+    def _create_products_batch(self, tx, products: list[Product]) -> None:
+        """Create Product + Variant nodes and link them."""
+        for p in products:
+            tx.run(
+                """
+                MERGE (prod:Product {productId: $product_id})
+                ON CREATE SET prod.created_at = datetime()
+                SET  prod.name = $name,
+                    prod.brand = $brand,
+                    prod.canonicalUrl = $url,
+                    prod.slug = $slug,
+                    prod.image = $image_url,
+                    prod.updated_at = datetime()
+
+                MERGE (v:Variant {variantId: $variant_id})
+                MERGE (prod)-[:HAS_VARIANT]->(v)
+                """,
+                {
+                    "product_id": p.product_id,
+                    "variant_id": p.variant_id,
+                    "name": p.name,
+                    "brand": p.brand,
+                    "url": p.url,
+                    "slug": p.slug,
+                    "image_url": p.image_url,
+                },
+            )
+
+            # optional embedding on Product (kept compatible with your retriever)
+            if p.embedding:
+                tx.run(
+                    """
+                    MATCH (prod:Product {productId: $product_id})
+                    SET prod.embedding = $embedding
+                    """,
+                    {"product_id": p.product_id, "embedding": p.embedding},
                 )
-                params['embedding'] = product.embedding
-            
-            tx.run(cypher_query, params)
+
             
 
     def _create_attribute_relationships_batch(self, tx, products: List[Product]) -> None:
@@ -320,17 +545,32 @@ class Neo4jProductRepository(IProductRepository):
         # Simple slugification - replace spaces with hyphens and lowercase
         return re.sub(r'[^\w\s-]', '', text.lower()).strip().replace(' ', '-')
 
+    # def _create_constraints(self, session: neo4j.Session) -> None:
+    #     """Create database constraints for data integrity."""
+    #     try:
+    #         # Create unique constraints
+    #         session.run("CREATE CONSTRAINT product_id_unique IF NOT EXISTS FOR (p:Product) REQUIRE p.product_id IS UNIQUE")
+    #         session.run("CREATE CONSTRAINT category_name_unique IF NOT EXISTS FOR (c:Category) REQUIRE c.name IS UNIQUE")
+    #         session.run("CREATE CONSTRAINT collection_name_unique IF NOT EXISTS FOR (col:Collection) REQUIRE col.name IS UNIQUE")
+    #         session.run("CREATE CONSTRAINT attribute_name_unique IF NOT EXISTS FOR (attr:Attribute) REQUIRE attr.name IS UNIQUE")
+    #         logger.info("Created database constraints")
+    #     except Exception as e:
+    #         logger.warning(f"Constraint creation failed (might already exist): {e}")
+
     def _create_constraints(self, session: neo4j.Session) -> None:
         """Create database constraints for data integrity."""
         try:
             # Create unique constraints
-            session.run("CREATE CONSTRAINT product_id_unique IF NOT EXISTS FOR (p:Product) REQUIRE p.product_id IS UNIQUE")
-            session.run("CREATE CONSTRAINT category_name_unique IF NOT EXISTS FOR (c:Category) REQUIRE c.name IS UNIQUE")
-            session.run("CREATE CONSTRAINT collection_name_unique IF NOT EXISTS FOR (col:Collection) REQUIRE col.name IS UNIQUE")
-            session.run("CREATE CONSTRAINT attribute_name_unique IF NOT EXISTS FOR (attr:Attribute) REQUIRE attr.name IS UNIQUE")
+            session.run("CREATE CONSTRAINT product_id_unique IF NOT EXISTS FOR (p:Product) REQUIRE p.productId IS UNIQUE")
+            session.run("CREATE CONSTRAINT variant_id_unique IF NOT EXISTS FOR (v:Variant) REQUIRE v.variantId IS UNIQUE")
+            session.run("CREATE CONSTRAINT category_code_unique IF NOT EXISTS FOR (c:Category) REQUIRE c.code IS UNIQUE")
+            session.run("CREATE CONSTRAINT subcategory_code_unique IF NOT EXISTS FOR (sc:SubCategory) REQUIRE sc.code IS UNIQUE")
+            session.run("CREATE CONSTRAINT maincategory_code_unique IF NOT EXISTS FOR (mc:MainCategory) REQUIRE mc.code IS UNIQUE")
+            session.run("CREATE CONSTRAINT attribute_key_unique IF NOT EXISTS FOR (a:Attribute) REQUIRE a.key IS UNIQUE")
             logger.info("Created database constraints")
         except Exception as e:
             logger.warning(f"Constraint creation failed (might already exist): {e}")
+
 
     async def get_products_by_query(
         self, query: str, num_results: int = 10, user_id: int | None = None, categories: list[str] | None = None

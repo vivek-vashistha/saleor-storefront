@@ -18,10 +18,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("load_products_neo4j")
 
+def split_list(s: str) -> list[str]:
+    if not s:
+        return []
+    seps = ["|", ",", ";"]
+    parts = [s]
+    for sep in seps:
+        parts = [p for chunk in parts for p in chunk.split(sep)]
+    # strip, dedupe, drop empties
+    cleaned = []
+    for p in (x.strip() for x in parts):
+        if p and p not in cleaned:
+            cleaned.append(p)
+    return cleaned
 
-def normalize_string_to_list(string: str) -> list[str]:
-    """Convert a string to a list of strings."""
-    return [item.strip().lower() for item in string.strip().lower().split() if item.strip()]
+# def normalize_string_to_list(string: str) -> list[str]:
+#     """Convert a string to a list of strings."""
+#     return [item.strip().lower() for item in string.strip().lower().split() if item.strip()]
 
 
 def get_repository() -> IProductRepository:
@@ -52,48 +65,99 @@ def get_repository() -> IProductRepository:
     return Neo4jProductRepository(connection)
 
 
+# def load_products_from_csv(csv_path: Path) -> list[Product]:
+#     """Load products from a CSV file.
+
+#     Args:
+#         csv_path: Path to the CSV file
+
+#     Returns:
+#         List of Product objects
+#     """
+#     products = []
+
+#     with open(csv_path, encoding="latin1") as file:
+#         reader = csv.DictReader(file)
+#         for row in reader:
+#             try:
+#                 # Parse embedding if it exists
+#                 embedding = None
+#                 if "embedding" in row and row["embedding"]:
+#                     try:
+#                         embedding = json.loads(row["embedding"])
+#                     except json.JSONDecodeError:
+#                         logger.warning(f"Failed to parse embedding for product {row['id']}")
+                
+#                 product = Product(
+#                     product_id=int(row["id"]),
+#                     name=row["name"].strip(),
+#                     price=float(row["price"].replace(",", "")),
+#                     category=row["category"].strip().lower(),
+#                     description=row["description"].strip(),
+#                     review_score=float(row["review_score"]),
+#                     best_for=normalize_string_to_list(row["best_for"]),
+#                     image_url=row["image_url"].strip(),
+#                     breadcrumbs=normalize_string_to_list(row["breadcrumbs"]),
+#                     embedding=embedding,
+#                 )
+#                 products.append(product)
+#             except (ValueError, KeyError) as e:
+#                 logger.warning(f"Skipping row due to error: {e}")
+#                 continue
+
+#     return products
+
 def load_products_from_csv(csv_path: Path) -> list[Product]:
-    """Load products from a CSV file.
-
-    Args:
-        csv_path: Path to the CSV file
-
-    Returns:
-        List of Product objects
-    """
-    products = []
-
-    with open(csv_path, encoding="latin1") as file:
-        reader = csv.DictReader(file)
+    products: list[Product] = []
+    with open(csv_path, encoding="utf-8") as f:
+        reader = csv.DictReader(f)
         for row in reader:
             try:
-                # Parse embedding if it exists
                 embedding = None
-                if "embedding" in row and row["embedding"]:
+                if row.get("embedding"):
                     try:
                         embedding = json.loads(row["embedding"])
                     except json.JSONDecodeError:
-                        logger.warning(f"Failed to parse embedding for product {row['id']}")
-                
-                product = Product(
-                    product_id=int(row["id"]),
-                    name=row["name"].strip(),
-                    price=float(row["price"].replace(",", "")),
-                    category=row["category"].strip().lower(),
-                    description=row["description"].strip(),
-                    review_score=float(row["review_score"]),
-                    best_for=normalize_string_to_list(row["best_for"]),
-                    image_url=row["image_url"].strip(),
-                    breadcrumbs=normalize_string_to_list(row["breadcrumbs"]),
-                    embedding=embedding,
+                        logger.warning(f"Failed to parse embedding for row with product {row.get('saleor_product_id')}")
+
+                products.append(
+                    Product(
+                        # IDs
+                        product_id=str(row["saleor_product_id"]).strip(),
+                        variant_id=str(row["saleor_variant_id"]).strip(),
+                        # product core
+                        name=row.get("name", "").strip(),
+                        brand=row.get("brand", "") or None,
+                        url=row.get("url", "") or None,
+                        slug=row.get("slug", "") or None,
+                        image_url=row.get("image_url", "") or None,
+                        # categories (3 levels)
+                        main_category=row.get("main_category") or None,
+                        main_category_slug=row.get("main_category_slug") or None,
+                        sub_category=row.get("sub_category") or None,
+                        sub_category_slug=row.get("sub_category_slug") or None,
+                        category_name=row.get("category_name") or None,
+                        category_slug=row.get("category_slug") or None,
+                        # attrs
+                        review_score=float(row["review_score"]) if row.get("review_score") else None,
+                        review_count=int(row["review_count"]) if row.get("review_count") else None,
+                        product_type_name=row.get("product_type_name") or None,
+                        product_type_slug=row.get("product_type_slug") or None,
+                        tax_class=row.get("tax_class") or None,
+                        collections=row.get("collections") or None,
+                        breadcrumbs=split_list(row.get("breadcrumbs", "")),
+                        short_description=row.get("short_description") or None,
+                        description_text=row.get("description_text") or None,
+                        best_for=[b.lower() for b in split_list(row.get("best_for", ""))],
+                        embedding=embedding,
+                    )
                 )
-                products.append(product)
-            except (ValueError, KeyError) as e:
+            except Exception as e:
                 logger.warning(f"Skipping row due to error: {e}")
                 continue
-
+    # from pprint import pprint
+    # pprint(products)
     return products
-
 
 async def setup_db():
     """Load products into a Neo4j product repository with enhanced graph relationships."""
@@ -104,7 +168,13 @@ async def setup_db():
     logger.info("Deleted all products and related nodes from the Neo4j repository")
 
     # Get configuration from environment variables or use defaults
-    products_csv = Path(__file__).parent.parent.joinpath("data/rei_products.csv")
+    # products_csv = Path(__file__).parent.parent.joinpath("data/rei_products.csv")
+
+    # 👉 point to your iHerb CSV
+    products_csv = Path(__file__).parent.parent.joinpath(
+        # "data/iherb_product_data - for_Neo4j_push_v3_with_saleor_ID.csv"
+        "data/iherb_data_for_neo4j/iherb_product_data - for_Neo4j_push_v3_with_saleor_ID.csv"
+    )
 
     logger.info(f"Products CSV: {products_csv}")
 
@@ -129,7 +199,7 @@ async def setup_db():
     logger.info("  - RECOMMENDED_WITH relationships for cross-category recommendations")
     
     await repository.insert_products(products)
-    logger.info(f"✅ Successfully initialized Neo4j repository with {len(products)} products")
+    logger.info(f"✅ Successfully initialized Neo4j repository with {len(products)} products/variants with 3-level categories and attributes")
     logger.info("🎉 Enhanced graph relationships created! You can now use:")
     logger.info("  - Graph-aware search with relationship scoring")
     logger.info("  - Related products discovery")

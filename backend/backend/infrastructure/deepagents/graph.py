@@ -7,57 +7,11 @@ from langchain.agents.middleware import AgentMiddleware, SummarizationMiddleware
 from langchain.agents.middleware.human_in_the_loop import ToolConfig
 from langchain.agents.middleware.prompt_caching import AnthropicPromptCachingMiddleware
 # Use local implementations instead of external deepagents package
-# from deepagents.middleware import PlanningMiddleware, FilesystemMiddleware, SubAgentMiddleware
-# from deepagents.prompts import BASE_AGENT_PROMPT
-# from deepagents.model import get_default_model
-# from deepagents.types import SubAgent, CustomSubAgent
+from .middleware import PlanningMiddleware, FilesystemMiddleware, SubAgentMiddleware
+from .prompts import BASE_AGENT_PROMPT
+from .model import get_default_model
+from .types import SubAgent, CustomSubAgent
 
-# Local implementations
-class AgentMiddleware:
-    """Base middleware class."""
-    pass
-
-class PlanningMiddleware(AgentMiddleware):
-    """Planning middleware for task planning."""
-    pass
-
-class FilesystemMiddleware(AgentMiddleware):
-    """Filesystem middleware for file operations."""
-    pass
-
-class SubAgentMiddleware(AgentMiddleware):
-    """Sub-agent middleware for delegation."""
-    def __init__(self, default_subagent_tools=None, subagents=None, model=None, is_async=False):
-        self.default_subagent_tools = default_subagent_tools or []
-        self.subagents = subagents or []
-        self.model = model
-        self.is_async = is_async
-
-class SummarizationMiddleware(AgentMiddleware):
-    """Summarization middleware for context management."""
-    def __init__(self, model=None, max_tokens_before_summary=120000, messages_to_keep=20):
-        self.model = model
-        self.max_tokens_before_summary = max_tokens_before_summary
-        self.messages_to_keep = messages_to_keep
-
-class HumanInTheLoopMiddleware(AgentMiddleware):
-    """Human-in-the-loop middleware for oversight."""
-    def __init__(self, interrupt_on=None):
-        self.interrupt_on = interrupt_on or {}
-
-class SubAgent:
-    """Sub-agent type."""
-    def __init__(self, name, description, prompt, tools=None, model=None, middleware=None):
-        self.name = name
-        self.description = description
-        self.prompt = prompt
-        self.tools = tools or []
-        self.model = model
-        self.middleware = middleware or []
-
-class CustomSubAgent(SubAgent):
-    """Custom sub-agent type."""
-    pass
 
 BASE_AGENT_PROMPT = """
 You are a sophisticated AI assistant with access to various tools and sub-agents.

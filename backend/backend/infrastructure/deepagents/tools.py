@@ -3,8 +3,8 @@ from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 from langchain.agents.tool_node import InjectedState
 from typing import Annotated, Union
-from deepagents.state import Todo, FilesystemState
-from deepagents.prompts import (
+from .state import Todo, FilesystemState
+from .prompts import (
     WRITE_TODOS_TOOL_DESCRIPTION,
     LIST_FILES_TOOL_DESCRIPTION,
     READ_FILE_TOOL_DESCRIPTION,

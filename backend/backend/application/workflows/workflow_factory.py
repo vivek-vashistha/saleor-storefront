@@ -18,6 +18,7 @@ from backend.application.services.background_memory_manager import BackgroundMem
 from backend.application.workflows.enhanced_search_query_workflow import EnhancedSearchQueryWorkflow
 from backend.application.agents.conversational_commerce_deep_agent import ConversationalCommerceDeepAgent
 from backend.application.workflows.simplified_deep_agents_workflow import SimplifiedDeepAgentsWorkflow
+from backend.application.agents.deepagents_commerce.deep_agent_workflow import DeepAgentWorkflow
 from backend.settings.deep_agents import deep_agents_config
 
 logger = logging.getLogger("conversational_commerce.workflow_factory")
@@ -90,6 +91,15 @@ class WorkflowFactory:
             # Initialize simplified Deep Agents workflow
             self.deep_agents_workflow = SimplifiedDeepAgentsWorkflow(deep_agent)
             
+            # Initialize new Deep Agent Commerce workflow
+            self.deep_agent_commerce_workflow = DeepAgentWorkflow(
+                product_service=self.product_service,
+                order_graph_service=self.order_graph_service,
+                hybrid_memory_service=self.memory_service,
+                semantic_memory_service=semantic_memory_service,
+                llm=self.llm
+            )
+            
             logger.info("Workflows initialized successfully")
             
         except Exception as e:
@@ -112,7 +122,7 @@ class WorkflowFactory:
             logger.info(f"Selected workflow for user {user_id}: {workflow_type.value}")
             
             if workflow_type == WorkflowType.DEEP_AGENTS:
-                return self.deep_agents_workflow
+                return self.deep_agent_commerce_workflow
             else:
                 return self.legacy_workflow
                 
@@ -125,6 +135,14 @@ class WorkflowFactory:
             else:
                 logger.error(f"No fallback enabled, raising error for user {user_id}")
                 raise
+
+    def get_deep_agent_commerce_workflow(self) -> DeepAgentWorkflow:
+        """Get the Deep Agent Commerce workflow as a singleton.
+
+        Returns:
+            The Deep Agent Commerce workflow instance
+        """
+        return self.deep_agent_commerce_workflow
 
     async def process_message(
         self,

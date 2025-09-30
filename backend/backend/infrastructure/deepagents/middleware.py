@@ -9,10 +9,10 @@ from langchain.chat_models import init_chat_model
 from langgraph.types import Command
 from langchain.agents.tool_node import InjectedState
 from typing import Annotated, Optional
-from deepagents.state import PlanningState, FilesystemState
-from deepagents.tools import write_todos, ls, read_file, write_file, edit_file
-from deepagents.prompts import WRITE_TODOS_SYSTEM_PROMPT, TASK_SYSTEM_PROMPT, FILESYSTEM_SYSTEM_PROMPT, TASK_TOOL_DESCRIPTION, BASE_AGENT_PROMPT
-from deepagents.types import SubAgent, CustomSubAgent
+from .state import PlanningState, FilesystemState
+from .tools import write_todos, ls, read_file, write_file, edit_file
+from .prompts import WRITE_TODOS_SYSTEM_PROMPT, TASK_SYSTEM_PROMPT, FILESYSTEM_SYSTEM_PROMPT, TASK_TOOL_DESCRIPTION, BASE_AGENT_PROMPT
+from .types import SubAgent, CustomSubAgent
 
 ###########################
 # Planning Middleware

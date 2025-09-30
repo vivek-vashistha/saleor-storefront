@@ -4,8 +4,10 @@ import logging
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 
+from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import BaseTool
+from langchain_core.output_parsers import PydanticOutputParser
 
 from backend.domain.entities.chat import ChatState, UserProfile
 from backend.domain.entities.enhanced_chat import EnhancedChatState
@@ -18,6 +20,49 @@ from backend.infrastructure.deepagents.graph import create_deep_agent, async_cre
 from backend.infrastructure.deepagents.types import SubAgent, CustomSubAgent
 
 logger = logging.getLogger("conversational_commerce.deep_agent")
+
+
+# Pydantic models for structured outputs
+class IntentAnalysis(BaseModel):
+    """Structured output for intent analysis."""
+    primary_intent: str = Field(description="The main intent of the user's message")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence score for the intent analysis")
+    entities: List[str] = Field(description="Key entities extracted from the message")
+    sentiment: str = Field(description="Sentiment of the message (positive, negative, neutral)")
+    urgency: str = Field(description="Urgency level (high, medium, low)")
+    required_capabilities: List[str] = Field(description="Capabilities needed to fulfill this intent")
+
+
+class TaskItem(BaseModel):
+    """Individual task in a task plan."""
+    task: str = Field(description="Description of the task")
+    priority: str = Field(description="Priority level (high, medium, low)")
+    dependencies: List[str] = Field(description="List of task IDs this task depends on")
+    required_tools: List[str] = Field(description="Tools needed for this task")
+    expected_outcome: str = Field(description="What this task should achieve")
+
+
+class TaskPlan(BaseModel):
+    """Structured output for task planning."""
+    tasks: List[TaskItem] = Field(description="List of tasks to complete")
+    overall_priority: str = Field(description="Overall priority of the entire plan")
+    estimated_duration: str = Field(description="Estimated time to complete all tasks")
+
+
+class SubAgentSelection(BaseModel):
+    """Structured output for sub-agent selection."""
+    selected_agent: str = Field(description="Name of the selected sub-agent")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence in the selection")
+    reasoning: str = Field(description="Reasoning for the selection")
+    alternative_agents: List[str] = Field(description="Alternative agents that could handle this")
+
+
+class ResponseSynthesis(BaseModel):
+    """Structured output for response synthesis."""
+    response_text: str = Field(description="The synthesized response text")
+    response_type: str = Field(description="Type of response (informational, transactional, conversational)")
+    suggested_actions: List[str] = Field(description="Suggested follow-up actions")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence in the response quality")
 
 
 class ConversationalCommerceDeepAgent(IDeepAgent):
@@ -575,12 +620,15 @@ Always respect user privacy and provide personalized experiences."""
             ]
 
     async def _select_sub_agent(self, intent_analysis: Dict[str, Any], task_plan: List[Dict[str, Any]]) -> str:
-        """Select the most appropriate sub-agent using intelligent LLM-based selection."""
+        """Select the most appropriate sub-agent using intelligent LLM-based selection with structured output."""
         try:
             # Get sub-agent information for context
             sub_agent_info = []
             for agent in self.sub_agents:
                 sub_agent_info.append(f"- {agent['name']}: {agent['description']}")
+            
+            # Create structured LLM with Pydantic output parser
+            structured_llm = self.llm.with_structured_output(SubAgentSelection)
             
             selection_prompt = f"""
             Select the most appropriate sub-agent to handle this request.
@@ -596,24 +644,21 @@ Always respect user privacy and provide personalized experiences."""
             2. Required capabilities vs agent capabilities
             3. Task complexity and specialization needs
             4. Potential for multi-agent coordination
-            
-            Respond with just the agent name (e.g., "product_expert").
-            If multiple agents are needed, respond with the primary one.
+            5. Confidence in the selection
+            6. Alternative agents that could handle this
             """
             
-            # Use LLM for intelligent sub-agent selection
-            response = await self.llm.ainvoke([{"role": "user", "content": selection_prompt}])
-            
-            # Extract agent name from response
-            selected_agent = response.content.strip().lower()
+            # Use structured LLM for sub-agent selection
+            selection = await structured_llm.ainvoke([{"role": "user", "content": selection_prompt}])
             
             # Validate selection
             available_agents = [agent["name"] for agent in self.sub_agents]
-            if selected_agent in available_agents:
-                return selected_agent
+            if selection.selected_agent in available_agents:
+                logger.info(f"Selected agent: {selection.selected_agent} (confidence: {selection.confidence})")
+                return selection.selected_agent
             else:
                 # Fallback to first available agent
-                logger.warning(f"Invalid agent selection '{selected_agent}', using fallback")
+                logger.warning(f"Invalid agent selection '{selection.selected_agent}', using fallback")
                 return available_agents[0] if available_agents else 'memory_manager'
                 
         except Exception as e:
@@ -709,13 +754,16 @@ Always respect user privacy and provide personalized experiences."""
         user_context: Dict[str, Any], 
         user_message: str
     ) -> str:
-        """Synthesize a coherent response using LLM-based dynamic generation."""
+        """Synthesize a coherent response using LLM-based dynamic generation with structured output."""
         try:
             # Get sub-agent information for context
             sub_agent_info = next(
                 (agent for agent in self.sub_agents if agent['name'] == sub_agent), 
                 {'name': sub_agent, 'description': 'General assistant'}
             )
+            
+            # Create structured LLM with Pydantic output parser
+            structured_llm = self.llm.with_structured_output(ResponseSynthesis)
             
             synthesis_prompt = f"""
             Generate a personalized, helpful response for the user.
@@ -738,12 +786,17 @@ Always respect user privacy and provide personalized experiences."""
             - Incorporates relevant information from tool results
             - Provides value and next steps
             - Maintains appropriate tone for the sub-agent
+            - Includes suggested follow-up actions
+            - Has appropriate response type classification
             """
             
-            # Use LLM for dynamic response synthesis
-            response = await self.llm.ainvoke([{"role": "user", "content": synthesis_prompt}])
+            # Use structured LLM for response synthesis
+            synthesis = await structured_llm.ainvoke([{"role": "user", "content": synthesis_prompt}])
             
-            return response.content.strip()
+            # Log the structured response for debugging
+            logger.info(f"Response synthesis - Type: {synthesis.response_type}, Confidence: {synthesis.confidence}")
+            
+            return synthesis.response_text
             
         except Exception as e:
             logger.error(f"Error synthesizing response: {e}")

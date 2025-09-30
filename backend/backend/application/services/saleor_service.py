@@ -104,10 +104,34 @@ class SaleorService:
                 if 'info' in saleor_response and 'response_time' in saleor_response['info']:
                     logger.info(f"Response Time: {saleor_response['info']['response_time']}s")
                 
-                # Enrich all products with the batch response
+                # Try to use structured products if present for deterministic mapping
+                structured_products = saleor_response.get('structured_products') if isinstance(saleor_response, dict) else None
+                id_to_price: dict[str, float] = {}
+                id_to_currency: dict[str, str] = {}
+                if structured_products and isinstance(structured_products, list):
+                    for item in structured_products:
+                        try:
+                            pid = str(item.get('id'))
+                            price = ((item.get('price') or {}).get('amount'))
+                            currency = ((item.get('price') or {}).get('currency'))
+                            if pid is not None and price is not None:
+                                id_to_price[pid] = float(price)
+                                if currency:
+                                    id_to_currency[pid] = str(currency)
+                        except Exception:
+                            continue
+
+                # Enrich all products with structured data when available; fallback to text parsing
                 enriched_products = []
                 for product in products:
-                    enriched_product = self._enrich_product(product, saleor_response)
+                    pid = str(product.product_id)
+                    if pid in id_to_price:
+                        enriched_product = product.model_copy()
+                        enriched_product.saleor_data = saleor_response
+                        enriched_product.price = id_to_price[pid]
+                        logger.info(f"Updated product '{product.name}' (ID: {product.product_id}) price to {id_to_price[pid]} from structured Saleor data")
+                    else:
+                        enriched_product = self._enrich_product(product, saleor_response)
                     enriched_products.append(enriched_product)
                 
                 logger.info(f"Successfully enriched {len(enriched_products)} products with Saleor batch data")

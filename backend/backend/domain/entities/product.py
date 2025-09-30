@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 from typing import List, Optional, Any
 
 
@@ -61,3 +61,12 @@ class Product(BaseModel):
 
     # allow extra for forward compatibility
     model_config = {"extra": "allow"}
+
+    # Backward-compatible fields expected by frontend
+    @computed_field
+    def description(self) -> Optional[str]:
+        return self.description_text
+
+    @computed_field
+    def category(self) -> Optional[str]:
+        return self.category_name or self.category_slug

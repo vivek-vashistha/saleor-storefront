@@ -33,20 +33,35 @@ class Neo4jProductRepository(IProductRepository):
         self.batch_size = 100  # Batch size for bulk operations
         
         # Define the enhanced retrieval query for graph-aware search
+        # self.retrieval_query = """
+        # RETURN  node.product_id as product_id,
+        #         node.name as name,
+        #         node.price as price,
+        #         node.category as category,
+        #         node.description as description,
+        #         node.review_score as review_score,
+        #         node.best_for as best_for,
+        #         node.image_url as image_url,
+        #         node.breadcrumbs as breadcrumbs,
+        #         score as similarityScore,
+        #         size([(node)-[:BELONGS_TO]->(c:Category) | c]) as category_count,
+        #         size([(node)-[:IN_COLLECTION]->(col:Collection) | col]) as collection_count
+        # """
+        
         self.retrieval_query = """
-        RETURN  node.product_id as product_id,
-                node.name as name,
-                node.price as price,
-                node.category as category,
-                node.description as description,
-                node.review_score as review_score,
-                node.best_for as best_for,
-                node.image_url as image_url,
-                node.breadcrumbs as breadcrumbs,
-                score as similarityScore,
-                size([(node)-[:BELONGS_TO]->(c:Category) | c]) as category_count,
-                size([(node)-[:IN_COLLECTION]->(col:Collection) | col]) as collection_count
+            CALL db.index.fulltext.queryNodes($fulltext, $query) YIELD node, score
+            WITH node AS prod, score
+            OPTIONAL MATCH (prod)-[:HAS_VARIANT]->(v:Variant)
+            OPTIONAL MATCH (v)-[:HAS_ATTR]->(bf:AttrValue {key:'best_for'})
+            OPTIONAL MATCH (v)-[:HAS_ATTR]->(descAV:AttrValue {key:'description_text'})
+            RETURN prod.productId AS product_id,
+                prod.name      AS name,
+                coalesce(prod.image, prod.image_url) AS image_url,
+                collect(distinct bf.value_str) AS best_for,
+                coalesce(descAV.value_str,'')  AS description,
+                score AS similarityScore
         """
+
 
     # async def insert_products(self, products: list[Product]) -> None:
     #     """Initialize the product repository from a list of products with enhanced graph relationships.
@@ -108,6 +123,9 @@ class Neo4jProductRepository(IProductRepository):
         """Upsert products with 3-level categories and AttrValues."""
         def _operation(driver: neo4j.Driver):
             with driver.session() as session:
+                # Create indexes first - this is crucial for search functionality
+                self._create_vector_index(session)
+                self._create_fulltext_index(session)
                 self._create_constraints(session)
 
                 total = len(products)
@@ -602,16 +620,32 @@ class Neo4jProductRepository(IProductRepository):
                 for record in result:
                     try:
                         product = Product(
-                            product_id=record['product_id'],
-                            name=record['name'],
-                            price=record['price'],
-                            category=record['category'],
-                            description=record['description'],
-                            review_score=record['review_score'],
-                            best_for=record['best_for'],
-                            image_url=record['image_url'],
-                            breadcrumbs=record.get('breadcrumbs', []),
-                            embedding=record.get('embedding')
+                            product_id=str(record.get('product_id')),
+                            variant_id=str(record.get('variant_id') or ''),
+                            name=record.get('name') or '',
+                            brand=record.get('brand'),
+                            url=record.get('url'),
+                            slug=record.get('slug'),
+                            image_url=record.get('image_url'),
+                            # categories will be resolved via relations; not projected directly
+                            main_category=None,
+                            main_category_slug=None,
+                            sub_category=None,
+                            sub_category_slug=None,
+                            category_name=record.get('category_name') or None,
+                            category_slug=record.get('category_slug') or None,
+                            # attrs
+                            review_score=None,
+                            review_count=None,
+                            product_type_name=None,
+                            product_type_slug=None,
+                            tax_class=None,
+                            collections=None,
+                            breadcrumbs=[],
+                            short_description=None,
+                            description_text=record.get('description_text') or None,
+                            best_for=[b for b in (record.get('best_for') or []) if b],
+                            embedding=record.get('embedding'),
                         )
                         products.append(product)
                     except Exception as e:
@@ -629,168 +663,297 @@ class Neo4jProductRepository(IProductRepository):
         )
 
     def _build_enhanced_search_query(self, query: str, num_results: int, categories: List[str] | None) -> str:
-        """Build an enhanced Cypher query that leverages graph relationships."""
-        
-        # Base query with graph traversal
+        """Build a Cypher query aligned with the current graph schema.
+
+        Current schema highlights:
+        - Product nodes use property `productId` (camelCase), not `product_id`
+        - Category relation is `(:Product)-[:IN_CATEGORY]->(:Category)`
+        - Variants exist: `(:Product)-[:HAS_VARIANT]->(:Variant)`
+        - Attributes are stored as `(:Variant)-[:HAS_ATTR]->(:AttrValue)-[:OF]->(:Attribute)`
+        - Product has `name`, `image` (not `image_url`)
+        - Descriptions/"best_for" live in AttrValues with keys `description_text` and `best_for`
+        """
+
         cypher_query = f"""
         CALL db.index.fulltext.queryNodes('{self.fulltext_index_name}', $query) YIELD node, score
-        WITH node, score
+        WITH node AS prod, score
         """
         
-        # Add category filtering if specified
-        if categories:
-            cypher_query += """
-            MATCH (node)-[:BELONGS_TO]->(c:Category)
-            WHERE any(cat IN $categories WHERE toLower(c.name) = toLower(cat))
-            """
-        
-        # Add graph-aware scoring
+        # Category filtering and projection (works whether categories provided or not)
         cypher_query += """
-        OPTIONAL MATCH (node)-[:HAS_ATTRIBUTE]->(attr:Attribute)
-        OPTIONAL MATCH (node)-[:IN_COLLECTION]->(col:Collection)
-        
-        WITH node, score,
-             size([(node)-[:HAS_ATTRIBUTE]->(a) | a]) as attribute_count,
-             size([(node)-[:IN_COLLECTION]->(c) | c]) as collection_count
-        
-        // Calculate enhanced score combining text similarity and graph metrics
-        WITH node, score,
-             (score * 0.8 + 
-              attribute_count * 0.1 + 
-              collection_count * 0.1) as enhanced_score
-        
-        RETURN DISTINCT node.product_id as product_id,
-               node.name as name,
-               node.price as price,
-               node.category as category,
-               node.description as description,
-               node.review_score as review_score,
-               node.best_for as best_for,
-               node.image_url as image_url,
-               node.breadcrumbs as breadcrumbs,
-               node.embedding as embedding,
-               enhanced_score as similarityScore
-        ORDER BY enhanced_score DESC
+        OPTIONAL MATCH (prod)-[:IN_CATEGORY]->(c:Category)
+        WITH prod, score,
+             collect(distinct c.name) AS c_names,
+             collect(distinct c.code) AS c_codes
+        WITH prod, score, c_names, c_codes,
+             CASE
+               WHEN size($categories) = 0 THEN true
+               ELSE any(cat IN $categories WHERE any(n IN c_names WHERE toLower(n) = toLower(cat))
+                                         OR any(cd IN c_codes WHERE toLower(cd) = toLower(cat)))
+             END AS cat_ok
+        WHERE cat_ok
+        """
+
+        cypher_query += """
+        OPTIONAL MATCH (prod)-[:HAS_VARIANT]->(v:Variant)
+        OPTIONAL MATCH (v)-[:HAS_ATTR]->(bf:AttrValue {key:'best_for'})
+        OPTIONAL MATCH (v)-[:HAS_ATTR]->(descAV:AttrValue {key:'description_text'})
+        OPTIONAL MATCH (v)-[:HAS_ATTR]->(shortAV:AttrValue {key:'short_description'})
+
+        WITH prod, score, c_names, c_codes,
+             collect(distinct bf.value_str) AS best_for,
+             coalesce(
+                 head(collect(distinct descAV.value_str)),
+                 head(collect(distinct shortAV.value_str)),
+                 ''
+             ) AS description_text,
+             head(collect(distinct v.variantId)) AS variant_id,
+             coalesce(head(c_names), '') AS category_name,
+             coalesce(head(c_codes), '') AS category_slug
+
+        RETURN DISTINCT prod.productId AS product_id,
+               variant_id AS variant_id,
+               prod.name AS name,
+               prod.brand AS brand,
+               prod.canonicalUrl AS url,
+               prod.slug AS slug,
+               coalesce(prod.image, prod.image_url) AS image_url,
+               prod.embedding AS embedding,
+               description_text AS description_text,
+               category_name AS category_name,
+               category_slug AS category_slug,
+               best_for AS best_for,
+               score AS similarityScore
+        ORDER BY similarityScore DESC
         LIMIT $num_results
         """
         
         return cypher_query
 
-    async def get_related_products(self, product_id: int, num_results: int = 5) -> list[Product]:
-        """Get related products using graph relationships."""
+    # async def get_related_products(self, product_id: int, num_results: int = 5) -> list[Product]:
+    #     """Get related products using graph relationships."""
         
+    #     def _operation(driver: neo4j.Driver):
+    #         with driver.session() as session:
+    #             cypher_query = """
+    #             MATCH (p:Product {product_id: $product_id})
+    #             OPTIONAL MATCH (p)-[:BELONGS_TO]->(c:Category)<-[:BELONGS_TO]-(category_products:Product)
+    #             OPTIONAL MATCH (p)-[:HAS_ATTRIBUTE]->(attr:Attribute)<-[:HAS_ATTRIBUTE]-(attr_products:Product)
+                
+    #             WITH p, category_products, attr_products
+    #             UNWIND [category_products, attr_products] as related
+    #             WITH DISTINCT related
+    #             WHERE related IS NOT NULL AND related.product_id <> $product_id
+                
+    #             RETURN related.product_id as product_id,
+    #                    related.name as name,
+    #                    related.price as price,
+    #                    related.category as category,
+    #                    related.description as description,
+    #                    related.review_score as review_score,
+    #                    related.best_for as best_for,
+    #                    related.image_url as image_url,
+    #                    related.breadcrumbs as breadcrumbs,
+    #                    related.embedding as embedding
+    #             LIMIT $num_results
+    #             """
+                
+    #             result = session.run(cypher_query, {
+    #                 'product_id': product_id,
+    #                 'num_results': num_results
+    #             })
+                
+    #             products = []
+    #             for record in result:
+    #                 try:
+    #                     product = Product(
+    #                         product_id=record['product_id'],
+    #                         name=record['name'],
+    #                         price=record['price'],
+    #                         category=record['category'],
+    #                         description=record['description'],
+    #                         review_score=record['review_score'],
+    #                         best_for=record['best_for'],
+    #                         image_url=record['image_url'],
+    #                         breadcrumbs=record.get('breadcrumbs', []),
+    #                         embedding=record.get('embedding')
+    #                     )
+    #                     products.append(product)
+    #                 except Exception as e:
+    #                     logger.warning(f"Failed to create related Product: {e}")
+    #                     continue
+                
+    #             logger.info(f"Retrieved {len(products)} related products for product {product_id}")
+    #             return products
+
+    #     return await asyncio.get_event_loop().run_in_executor(
+    #         None, 
+    #         self.connection.execute_db_operation,
+    #         _operation, 
+    #         "Failed to fetch related products from Neo4j"
+    #     )
+
+    async def get_related_products(self, product_id: str, num_results: int = 5) -> list[Product]:
         def _operation(driver: neo4j.Driver):
             with driver.session() as session:
                 cypher_query = """
-                MATCH (p:Product {product_id: $product_id})
-                OPTIONAL MATCH (p)-[:BELONGS_TO]->(c:Category)<-[:BELONGS_TO]-(category_products:Product)
-                OPTIONAL MATCH (p)-[:HAS_ATTRIBUTE]->(attr:Attribute)<-[:HAS_ATTRIBUTE]-(attr_products:Product)
-                
-                WITH p, category_products, attr_products
-                UNWIND [category_products, attr_products] as related
-                WITH DISTINCT related
-                WHERE related IS NOT NULL AND related.product_id <> $product_id
-                
-                RETURN related.product_id as product_id,
-                       related.name as name,
-                       related.price as price,
-                       related.category as category,
-                       related.description as description,
-                       related.review_score as review_score,
-                       related.best_for as best_for,
-                       related.image_url as image_url,
-                       related.breadcrumbs as breadcrumbs,
-                       related.embedding as embedding
+                // anchor product
+                MATCH (p:Product {productId: $product_id})
+
+                // same leaf category
+                OPTIONAL MATCH (p)-[:IN_CATEGORY]->(c:Category)<-[:IN_CATEGORY]-(q:Product)
+
+                // overlap on best_for via variants/attrvalues
+                OPTIONAL MATCH (p)-[:HAS_VARIANT]->(:Variant)-[:HAS_ATTR]->(:AttrValue {key:'best_for'})<-[:HAS_ATTR]-(:Variant)<-[:HAS_VARIANT]-(q)
+
+                WITH q, count(*) AS relScore
+                WHERE q IS NOT NULL AND q <> p
+                // pull display fields + desc/best_for for results
+                OPTIONAL MATCH (q)-[:HAS_VARIANT]->(qv:Variant)-[:HAS_ATTR]->(qbf:AttrValue {key:'best_for'})
+                OPTIONAL MATCH (qv)-[:HAS_ATTR]->(qdesc:AttrValue {key:'description_text'})
+
+                RETURN q.productId AS product_id,
+                    q.name      AS name,
+                    coalesce(q.image, q.image_url) AS image_url,
+                    collect(distinct qbf.value_str) AS best_for,
+                    coalesce(qdesc.value_str,'')    AS description
+                ORDER BY relScore DESC, name ASC
                 LIMIT $num_results
                 """
-                
                 result = session.run(cypher_query, {
                     'product_id': product_id,
                     'num_results': num_results
                 })
                 
                 products = []
-                for record in result:
-                    try:
-                        product = Product(
-                            product_id=record['product_id'],
-                            name=record['name'],
-                            price=record['price'],
-                            category=record['category'],
-                            description=record['description'],
-                            review_score=record['review_score'],
-                            best_for=record['best_for'],
-                            image_url=record['image_url'],
-                            breadcrumbs=record.get('breadcrumbs', []),
-                            embedding=record.get('embedding')
-                        )
-                        products.append(product)
-                    except Exception as e:
-                        logger.warning(f"Failed to create related Product: {e}")
-                        continue
-                
+                for r in result:
+                    products.append(Product(
+                        product_id=r['product_id'],
+                        variant_id="",  # not needed here
+                        name=r['name'],
+                        brand=None,
+                        url=None,
+                        slug=None,
+                        image_url=r['image_url'],
+                        # categories resolved elsewhere
+                        # attributes:
+                        review_score=None,
+                        review_count=None,
+                        product_type_name=None,
+                        product_type_slug=None,
+                        tax_class=None,
+                        collections=None,
+                        breadcrumbs=[],
+                        short_description=None,
+                        description_text=r['description'],
+                        best_for=r['best_for'] or [],
+                        embedding=None
+                    ))
                 logger.info(f"Retrieved {len(products)} related products for product {product_id}")
                 return products
 
         return await asyncio.get_event_loop().run_in_executor(
-            None, 
-            self.connection.execute_db_operation,
-            _operation, 
+            None, self.connection.execute_db_operation, _operation,
             "Failed to fetch related products from Neo4j"
         )
 
-    async def get_products_by_ids(self, product_ids: list[int]) -> list[Product]:
-        """Get products by their IDs.
 
-        Args:
-            product_ids: List of product IDs to retrieve
+    # async def get_products_by_ids(self, product_ids: list[int]) -> list[Product]:
+    #     """Get products by their IDs.
 
-        Returns:
-            List of Product objects matching the provided IDs
-        """
+    #     Args:
+    #         product_ids: List of product IDs to retrieve
+
+    #     Returns:
+    #         List of Product objects matching the provided IDs
+    #     """
+    #     if not product_ids:
+    #         return []
+
+    #     def _operation(driver: neo4j.Driver):
+    #         with driver.session() as session:
+    #             cypher_query = """
+    #             MATCH (p:Product)
+    #             WHERE p.product_id IN $product_ids
+    #             RETURN p
+    #             """
+                
+    #             result = session.run(cypher_query, {'product_ids': product_ids})
+                
+    #             products = []
+    #             for record in result:
+    #                 node = record['p']
+    #                 try:
+    #                     product = Product(
+    #                         product_id=node['product_id'],
+    #                         name=node['name'],
+    #                         price=node['price'],
+    #                         category=node['category'],
+    #                         description=node['description'],
+    #                         review_score=node['review_score'],
+    #                         best_for=node['best_for'],
+    #                         image_url=node['image_url'],
+    #                         breadcrumbs=node.get('breadcrumbs', []),
+    #                         embedding=node.get('embedding')
+    #                     )
+    #                     products.append(product)
+    #                 except Exception as e:
+    #                     logger.warning(f"Failed to create Product from node: {e}")
+    #                     continue
+                
+    #             logger.info(f"Retrieved {len(products)} products by IDs from Neo4j")
+    #             return products
+
+    #     return await asyncio.get_event_loop().run_in_executor(
+    #         None, 
+    #         self.connection.execute_db_operation,
+    #         _operation, 
+    #         "Failed to fetch products by IDs from Neo4j"
+    #     )
+
+    async def get_products_by_ids(self, product_ids: list[str]) -> list[Product]:
         if not product_ids:
             return []
-
         def _operation(driver: neo4j.Driver):
             with driver.session() as session:
                 cypher_query = """
                 MATCH (p:Product)
-                WHERE p.product_id IN $product_ids
-                RETURN p
+                WHERE p.productId IN $product_ids
+                OPTIONAL MATCH (p)-[:HAS_VARIANT]->(v:Variant)-[:HAS_ATTR]->(d:AttrValue {key:'description_text'})
+                OPTIONAL MATCH (v)-[:HAS_ATTR]->(bf:AttrValue {key:'best_for'})
+                RETURN p, collect(distinct bf.value_str) AS best_for, coalesce(d.value_str,'') AS description
                 """
-                
                 result = session.run(cypher_query, {'product_ids': product_ids})
                 
                 products = []
                 for record in result:
                     node = record['p']
-                    try:
-                        product = Product(
-                            product_id=node['product_id'],
-                            name=node['name'],
-                            price=node['price'],
-                            category=node['category'],
-                            description=node['description'],
-                            review_score=node['review_score'],
-                            best_for=node['best_for'],
-                            image_url=node['image_url'],
-                            breadcrumbs=node.get('breadcrumbs', []),
+                    products.append(Product(
+                        product_id=node['productId'],
+                        variant_id="",
+                        name=node.get('name'),
+                        brand=node.get('brand'),
+                        url=node.get('canonicalUrl'),
+                        slug=node.get('slug'),
+                        image_url=node.get('image') or node.get('image_url'),
+                        # categories handled elsewhere
+                        review_score=None, review_count=None,
+                        product_type_name=None, product_type_slug=None,
+                        tax_class=None, collections=None,
+                        breadcrumbs=[],
+                        short_description=None,
+                        description_text=record['description'],
+                        best_for=record['best_for'] or [],
                             embedding=node.get('embedding')
-                        )
-                        products.append(product)
-                    except Exception as e:
-                        logger.warning(f"Failed to create Product from node: {e}")
-                        continue
-                
+                    ))
                 logger.info(f"Retrieved {len(products)} products by IDs from Neo4j")
                 return products
 
         return await asyncio.get_event_loop().run_in_executor(
-            None, 
-            self.connection.execute_db_operation,
-            _operation, 
+            None, self.connection.execute_db_operation, _operation,
             "Failed to fetch products by IDs from Neo4j"
         )
+
 
     async def delete_all_products(self) -> None:
         """Delete all products and related nodes from the repository.
@@ -836,17 +999,27 @@ class Neo4jProductRepository(IProductRepository):
             # Index might already exist
             logger.warning(f"Vector index creation failed (might already exist): {e}")
 
+    # def _create_fulltext_index(self, session: neo4j.Session) -> None:
+    #     """Create fulltext index for product search."""
+    #     try:
+    #         cypher_query = f"""
+    #         CREATE FULLTEXT INDEX {self.fulltext_index_name} IF NOT EXISTS
+    #         FOR (p:Product) ON EACH [p.name, p.description, p.category]
+    #         """
+    #         session.run(cypher_query)
+    #         logger.info(f"Created fulltext index: {self.fulltext_index_name}")
+    #     except Exception as e:
+    #         # Index might already exist
+    #         logger.warning(f"Fulltext index creation failed (might already exist): {e}")
+
     def _create_fulltext_index(self, session: neo4j.Session) -> None:
-        """Create fulltext index for product search."""
         try:
             cypher_query = f"""
             CREATE FULLTEXT INDEX {self.fulltext_index_name} IF NOT EXISTS
-            FOR (p:Product) ON EACH [p.name, p.description, p.category]
+            FOR (p:Product) ON EACH [p.name, p.slug]
             """
             session.run(cypher_query)
             logger.info(f"Created fulltext index: {self.fulltext_index_name}")
         except Exception as e:
-            # Index might already exist
             logger.warning(f"Fulltext index creation failed (might already exist): {e}")
-            
     

@@ -190,6 +190,10 @@ class ChatState(BaseModel):
         default_factory=list,
         description="List of products explicitly referenced in the conversation",
     )
+    product_bundles: list[ProductBundle] = Field(
+        default_factory=list,
+        description="List of product bundles recommended by the deep agent",
+    )
     user_profile: UserProfile = Field(
         default_factory=UserProfile,
         description="User profile information extracted from conversations",
@@ -220,6 +224,15 @@ class ChatState(BaseModel):
             True if there are referenced products, False otherwise
         """
         return bool(self.referenced_products)
+
+    @computed_field
+    def has_product_bundles(self) -> bool:
+        """Check if there are any product bundles available.
+
+        Returns:
+            True if there are product bundles, False otherwise
+        """
+        return bool(self.product_bundles)
 
     @computed_field
     def has_user_profile(self) -> bool:
@@ -304,3 +317,27 @@ class ChatState(BaseModel):
             profile_updates: Dictionary containing profile updates
         """
         self.user_profile.update_profile(profile_updates)
+
+    def set_referenced_products(self, products: list[Product]) -> None:
+        """Set the referenced products in the state.
+
+        Args:
+            products: List of products to set as referenced products
+        """
+        self.referenced_products = products
+
+    def set_product_bundles(self, bundles: list[ProductBundle]) -> None:
+        """Set the product bundles in the state.
+
+        Args:
+            bundles: List of product bundles to set in the state
+        """
+        self.product_bundles = bundles
+
+    def add_product_bundles(self, bundles: list[ProductBundle]) -> None:
+        """Add product bundles to the existing bundles in the state.
+
+        Args:
+            bundles: List of product bundles to add to the state
+        """
+        self.product_bundles.extend(bundles)

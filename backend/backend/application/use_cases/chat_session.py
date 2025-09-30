@@ -152,8 +152,8 @@ class ProcessChatMessageUseCase:
         logger.info(f"Processing message: '{message_content}' for session {session.id}")
 
         # Check if this is an order-related query FIRST
-        is_order_query = await self._is_order_query(message_content, session)
-        logger.info(f"Order query detection result: {is_order_query}")
+        # is_order_query = await self._is_order_query(message_content, session)
+        # logger.info(f"Order query detection result: {is_order_query}")
 
         # Add the human message to the session
         session.add_message(message_content)
@@ -171,108 +171,33 @@ class ProcessChatMessageUseCase:
             # Reset referenced products if no products are referenced
             session.state.referenced_products = []
 
-        # If it's an order query, handle it immediately and skip product processing
-        if is_order_query:
-            logger.info("Handling order query - skipping product processing")
-            await self._handle_order_queries(session, message_content)
-        else:
-            logger.info("Processing as product query")
-            
-            # Log user profile information if available
-            if session.state.has_user_profile:
-                # logger.info(f"User profile available: {session.state.user_profile.get_relevant_context('general')}")
-                profile = session.state.user_profile
-                logger.info(
-                    "User profile available: "
-                    f"email={profile.email}, "
-                    f"health_conditions={profile.health_conditions}, "
-                    f"activity_preferences={profile.activity_preferences}, "
-                    f"product_preferences={profile.product_preferences}, "
-                    f"budget_range={profile.budget_range}"
-                )
-
-                # If we already have the user's email, proactively fetch order context once
-                try:
-                    email_present = bool((profile.email or '').strip())
-                    already_added_orders = any(
-                        isinstance(msg.get('content', ''), str) and ('order' in msg.get('content', '').lower())
-                        for msg in session.state.messages
-                    )
-                    if email_present and not already_added_orders:
-                        logger.info("Email present in profile; preloading user's order status context")
-                        await self._handle_order_queries(session, "orders details")    # users query as order details
-                except Exception as preload_err:
-                    logger.warning(f"Failed to preload orders context: {preload_err}")
-            else:
-                logger.info("No user profile information available")
-            
-            # Get the appropriate workflow for this user
-            workflow = self.workflow_factory.get_workflow_for_user(session.user_id)
-            workflow_name = workflow.__class__.__name__
-            logger.info(f"[PROCESS_CHAT] Using workflow: {workflow_name}")
-            
-            # Process the message with the selected workflow
-            session.state = await workflow.run(session.state)
-            logger.info(f"[PROCESS_CHAT] Workflow {workflow_name} completed")
-            
-            # Log the state after LangGraph processing
-            logger.info(f"[PROCESS_CHAT] State after LangGraph processing:")
-            logger.info(f"[PROCESS_CHAT] - Total messages: {len(session.state.messages)}")
-            logger.info(f"[PROCESS_CHAT] - Search queries: {len(session.state.search_queries)}")
-            logger.info(f"[PROCESS_CHAT] - Is detail sufficient: {session.state.is_detail_sufficient}")
-            logger.info(f"[PROCESS_CHAT] - Is conversation saturated: {session.state.is_conversation_saturated}")
-            
-            # Log the last few messages to see what LangGraph generated
-            if session.state.messages:
-                logger.info(f"[PROCESS_CHAT] Last 3 messages from LangGraph:")
-                for i, msg in enumerate(session.state.messages[-3:]):
-                    msg_type = msg.get('type', 'unknown')
-                    content = msg.get('content', '')
-                    if isinstance(content, list):
-                        content_str = ' '.join(str(item) for item in content)
-                    else:
-                        content_str = str(content)
-                    logger.info(f"[PROCESS_CHAT] Message {i}: type='{msg_type}', content='{content_str[:100]}...'")
-
-            # Get products based on user intent, not just number of queries
-            if session.state.has_search_query:
-                logger.info(f"Found {len(session.state.search_queries)} search queries to process")
-                
-                # Log all search queries
-                for i, query in enumerate(session.state.search_queries):
-                    logger.info(f"Search Query {i+1}: '{query.query}' -> categories: {query.categories}")
-                
-                # Use LLM to determine if user wants bundles or individual products
-                should_bundle = await self._determine_bundling_intent_with_llm(session.state, message_content)
-                logger.info(f"LLM determined bundling intent: {should_bundle}")
-                
-                if should_bundle:
-                    logger.info("LLM determined user wants bundles - creating intelligent product bundles")
-                    product_bundles = await self.product_service.get_intelligent_product_bundles(
-                        session.state.search_queries, 
-                        user_profile=session.state.user_profile,
-                        max_bundles=3
-                    )
-
-                    if product_bundles:
-                        logger.info(f"Created {len(product_bundles)} intelligent product bundles")
-                        # Add the product bundles to the AI message
-                        session.add_ai_message_with_product_bundles(product_bundles)
-                    else:
-                        logger.warning("No intelligent product bundles created")
+        # Get the appropriate workflow for this user
+        workflow = self.workflow_factory.get_workflow_for_user(session.user_id)
+        workflow_name = workflow.__class__.__name__
+        logger.info(f"[PROCESS_CHAT] Using workflow: {workflow_name}")
+        
+        # Process the message with the selected workflow
+        session.state = await workflow.run(session.state)
+        logger.info(f"[PROCESS_CHAT] Workflow {workflow_name} completed")
+        
+        # Log the state after workflow processing
+        logger.info(f"[PROCESS_CHAT] State after workflow processing:")
+        logger.info(f"[PROCESS_CHAT] - Total messages: {len(session.state.messages)}")
+        logger.info(f"[PROCESS_CHAT] - Search queries: {len(session.state.search_queries)}")
+        logger.info(f"[PROCESS_CHAT] - Is detail sufficient: {session.state.is_detail_sufficient}")
+        logger.info(f"[PROCESS_CHAT] - Is conversation saturated: {session.state.is_conversation_saturated}")
+        
+        # Log the last few messages to see what workflow generated
+        if session.state.messages:
+            logger.info(f"[PROCESS_CHAT] Last 3 messages from workflow:")
+            for i, msg in enumerate(session.state.messages[-3:]):
+                msg_type = msg.get('type', 'unknown')
+                content = msg.get('content', '')
+                if isinstance(content, list):
+                    content_str = ' '.join(str(item) for item in content)
                 else:
-                    logger.info("LLM determined user wants individual products - getting product list")
-                    products = await self.product_service.get_products_for_query(
-                        session.state.search_queries[0], max_num_results=5
-                    )
-
-                    if products:
-                        logger.info(f"Retrieved {len(products)} individual products")
-                        session.add_ai_message_with_products(products)
-                    else:
-                        logger.warning("No products retrieved for single query")
-            else:
-                logger.info("No search queries generated - no products to retrieve")
+                    content_str = str(content)
+                logger.info(f"[PROCESS_CHAT] Message {i}: type='{msg_type}', content='{content_str[:100]}...'")
 
         # Log AI responses generated for this user message
         try:

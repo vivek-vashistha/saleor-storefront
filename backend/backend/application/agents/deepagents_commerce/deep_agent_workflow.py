@@ -65,11 +65,11 @@ class DeepAgentWorkflow:
             
             # Stream the agent response
             for event in self.agent.stream({"messages": messages}, config=thread_cfg):
-                logger.debug(f"Deep agent stream event: {event}")
+                logger.info(f"Deep agent stream event: {event}")
                 
                 # Handle different event types based on logs analysis
                 event_type = self._get_event_type(event)
-                logger.debug(f"Event type: {event_type}")
+                logger.info(f"Event type: {event_type}")
                 
                 if event_type == "model_request":
                     # Handle AI model responses
@@ -90,7 +90,7 @@ class DeepAgentWorkflow:
                     # Handle final response with recommendations
                     self._handle_response_event(event, state)
                 else:
-                    logger.debug(f"Unhandled event type: {event_type}")
+                    logger.info(f"Unhandled event type: {event_type}")
             logger.info("Deep agent workflow completed successfully")
             return state
             
@@ -107,6 +107,8 @@ class DeepAgentWorkflow:
         """Determine the event type based on the event structure."""
         if "model_request" in event:
             return "model_request"
+        elif "tools" in event:
+            return "tool_result"
         elif "tool_call" in event or "tool_calls" in event:
             return "tool_call"
         elif "tool_result" in event or "tool_results" in event:
@@ -137,6 +139,103 @@ class DeepAgentWorkflow:
     def _handle_tool_result(self, event: dict, state: ChatState):
         """Handle tool result events (for future intermediate results display)."""
         logger.info(f"Tool result event: {event}")
+        
+        # Handle tools event structure from logs (e.g., {'tools': {'messages': [ToolMessage(...)]}})
+        if "tools" in event and "messages" in event["tools"]:
+            for tool_message in event["tools"]["messages"]:
+                if hasattr(tool_message, 'content') and tool_message.content:
+                    try:
+                        # Parse the tool result content
+                        import json
+                        tool_data = json.loads(tool_message.content)
+                        logger.info(f"Parsed tool data: {type(tool_data)} - {tool_data}")
+                        
+                        # Handle product search results (list of products)
+                        if isinstance(tool_data, list) and len(tool_data) > 0:
+                            # Check if it's a list of products
+                            if "product_id" in tool_data[0]:
+                                from backend.domain.entities.product import Product
+                                product_objects = [Product.model_validate(p) for p in tool_data]
+                                # Create a proper ProductRecommendationMessage instead of storing in state
+                                state.add_ai_message_with_products(product_objects)
+                                logger.info(f"Added {len(product_objects)} products as recommendation message")
+                            
+                            # Check if it's a list of bundles
+                            elif "bundle_id" in tool_data[0]:
+                                from backend.domain.entities.product_bundle import ProductBundle
+                                bundle_objects = [ProductBundle.model_validate(b) for b in tool_data]
+                                # Create a proper ProductBundleRecommendationMessage instead of storing in state
+                                state.add_ai_message_with_product_bundles(bundle_objects)
+                                logger.info(f"Added {len(bundle_objects)} bundles as recommendation message")
+                        
+                        # Handle single bundle object (not in a list)
+                        elif isinstance(tool_data, dict):
+                            # Check if it's a single bundle
+                            if "bundle_id" in tool_data:
+                                from backend.domain.entities.product_bundle import ProductBundle
+                                bundle_object = ProductBundle.model_validate(tool_data)
+                                # Create a proper ProductBundleRecommendationMessage instead of storing in state
+                                state.add_ai_message_with_product_bundles([bundle_object])
+                                logger.info(f"Added 1 bundle as recommendation message")
+                            
+                            # Check if it's a single product
+                            elif "product_id" in tool_data:
+                                from backend.domain.entities.product import Product
+                                product_object = Product.model_validate(tool_data)
+                                # Create a proper ProductRecommendationMessage instead of storing in state
+                                state.add_ai_message_with_products([product_object])
+                                logger.info(f"Added 1 product as recommendation message")
+                    
+                    except (json.JSONDecodeError, KeyError, ValueError) as e:
+                        logger.warning(f"Could not parse tool result: {e}")
+                        continue
+        
+        # Check if this is a tool result that contains products or bundles
+        elif "tool_result" in event:
+            tool_result = event["tool_result"]
+            if isinstance(tool_result, dict):
+                # Handle product search results
+                if "products" in tool_result and tool_result["products"]:
+                    products = tool_result["products"]
+                    if isinstance(products[0], dict):
+                        from backend.domain.entities.product import Product
+                        products = [Product(**p) for p in products]
+                    # Create a proper ProductRecommendationMessage instead of storing in state
+                    state.add_ai_message_with_products(products)
+                    logger.info(f"Added {len(products)} products as recommendation message")
+                
+                # Handle product bundle results
+                if "bundles" in tool_result and tool_result["bundles"]:
+                    bundles = tool_result["bundles"]
+                    if isinstance(bundles[0], dict):
+                        from backend.domain.entities.product_bundle import ProductBundle
+                        bundles = [ProductBundle(**b) for b in bundles]
+                    # Create a proper ProductBundleRecommendationMessage instead of storing in state
+                    state.add_ai_message_with_product_bundles(bundles)
+                    logger.info(f"Added {len(bundles)} bundles as recommendation message")
+                
+                # Handle emit_recommendations tool result (return_direct=True)
+                if "message" in tool_result:
+                    # This is likely from emit_recommendations tool
+                    state.add_message(tool_result["message"], is_human=False)
+                    
+                    # Update state with products and bundles from the tool result
+                    if "products" in tool_result and tool_result["products"]:
+                        products = tool_result["products"]
+                        if isinstance(products[0], dict):
+                            from backend.domain.entities.product import Product
+                            products = [Product(**p) for p in products]
+                        state.set_referenced_products(products)
+                        logger.info(f"Set {len(products)} products from emit_recommendations in state")
+                    
+                    if "bundles" in tool_result and tool_result["bundles"]:
+                        bundles = tool_result["bundles"]
+                        if isinstance(bundles[0], dict):
+                            from backend.domain.entities.product_bundle import ProductBundle
+                            bundles = [ProductBundle(**b) for b in bundles]
+                        state.set_product_bundles(bundles)
+                        logger.info(f"Set {len(bundles)} product bundles from emit_recommendations in state")
+        
         # TODO: Add intermediate tool result display
         # This will be used to show tool execution results
     
@@ -163,9 +262,23 @@ class DeepAgentWorkflow:
                 # Add the main message
                 state.add_message(final_response["message"], is_human=False)
                 
-                # Add product bundles if available
+                # Update state fields directly with products and bundles
+                if "products" in final_response and final_response["products"]:
+                    # Convert dict products to Product objects if needed
+                    products = final_response["products"]
+                    if isinstance(products[0], dict):
+                        from backend.domain.entities.product import Product
+                        products = [Product(**p) for p in products]
+                    state.set_referenced_products(products)
+                    logger.info(f"Set {len(products)} products in state")
+                
                 if "bundles" in final_response and final_response["bundles"]:
-                    state.add_ai_message_with_product_bundles(final_response["bundles"])
-                    logger.info(f"Added {len(final_response['bundles'])} product bundles to state")
+                    # Convert dict bundles to ProductBundle objects if needed
+                    bundles = final_response["bundles"]
+                    if isinstance(bundles[0], dict):
+                        from backend.domain.entities.product_bundle import ProductBundle
+                        bundles = [ProductBundle(**b) for b in bundles]
+                    state.set_product_bundles(bundles)
+                    logger.info(f"Set {len(bundles)} product bundles in state")
             
             

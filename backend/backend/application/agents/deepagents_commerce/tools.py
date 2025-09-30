@@ -235,12 +235,24 @@ def get_user_orders(user_id: str, limit: int = 50, offset: int = 0) -> List[Dict
 # TOOL: final emitter (UI contract)
 # -------------------------
 @tool("emit_recommendations", return_direct=True)
-def emit_recommendations(message: str, bundles: List[Dict[str, Any]], assumptions: Optional[List[str]] = None) -> Dict[str, Any]:
+def emit_recommendations(
+    message: str, 
+    bundles: Optional[List[Dict[str, Any]]] = None, 
+    products: Optional[List[Dict[str, Any]]] = None,
+    assumptions: Optional[List[str]] = None
+) -> Dict[str, Any]:
     """
-    Final payload for your UI: concise assistant message plus a list of ProductBundle dicts.
+    Final payload for your UI: concise assistant message plus product bundles and/or individual products.
     """
-    return {
+    result = {
         "message": message,
-        "bundles": bundles,
         "assumptions": assumptions or []
     }
+    
+    if bundles:
+        result["bundles"] = bundles
+    
+    if products:
+        result["products"] = products
+    
+    return result

@@ -22,7 +22,9 @@ const ProductPanel: React.FC<ProductPanelProps> = ({allBundles = [], messageType
             const seg = window.location.pathname.split('/')[1];
             if (seg) return seg;
         }
-        return "default-channel";
+        // default switched to channel-ind (was default-channel)
+        // return "default-channel";
+        return "channel-ind";
     };
     const [openSnackbar, setOpenSnackbar] = useState(false);
     const [selectedBundleIndex, setSelectedBundleIndex] = useState(0);

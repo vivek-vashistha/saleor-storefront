@@ -30,14 +30,15 @@ const ProductRecommendation: React.FC<ProductProps> = ({ product }) => {
   const router = useRouter();
 
   const resolveChannel = () => {
-    // Prefer route param; fallback to first path segment; default to "default-channel"
+    // Prefer route param; fallback to first path segment; default switched to "channel-ind" (was "default-channel")
     const fromParams = params?.channel;
     if (fromParams) return fromParams;
     if (typeof window !== 'undefined') {
       const seg = window.location.pathname.split('/')[1];
       if (seg) return seg;
     }
-    return "default-channel";
+    // return "default-channel";
+    return "channel-ind";
   };
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -137,7 +138,7 @@ const ProductRecommendation: React.FC<ProductProps> = ({ product }) => {
 
         <CardFooter className="p-2 pt-0 border-t border-border flex flex-col sm:flex-row justify-between sm:items-center gap-1">
           <p className="text-primary text-lg font-bold">
-            ${product.price.toFixed(2)}
+            {(resolveChannel() === "channel-ind" ? "₹" : "$")}{product.price.toFixed(2)}
           </p>
           <Button 
             onClick={handleAddToCart}

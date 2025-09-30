@@ -44,24 +44,7 @@ class SaleorService:
         try:
             # Extract just the product IDs for kg_products (like in test script)
             # Map our system IDs to Saleor IDs for the API call
-            saleor_id_mapping = {
-                "229809": "UHJvZHVjdDozNDU=",
-                "239565": "UHJvZHVjdDozNDQ=",
-                "236163": "UHJvZHVjdDoyNTM=",
-                "217544": "UHJvZHVjdDoyNTI=",
-                "237610": "UHJvZHVjdDoyODQ="
-            }
-            
-            # Convert our system IDs to Saleor IDs for the API call
-            product_ids_for_batch = []
-            for product in products:
-                system_id = str(product.product_id)
-                if system_id in saleor_id_mapping:
-                    saleor_id = saleor_id_mapping[system_id]
-                    product_ids_for_batch.append(saleor_id)
-                    logger.info(f"Mapped system ID {system_id} to Saleor ID {saleor_id} for product '{product.name}'")
-                else:
-                    logger.warning(f"No Saleor ID mapping found for system ID {system_id}, product '{product.name}'")
+            product_ids_for_batch = [str(p.product_id) for p in products]
             
             # Use the mapped Saleor IDs for the API call
             saleor_response = await self.saleor_connection.get_products_batch_simple(product_ids_for_batch)
@@ -155,15 +138,6 @@ class SaleorService:
         # Add Saleor data as an attribute
         enriched_product.saleor_data = saleor_data
         
-        # Map Saleor IDs to our system IDs
-        saleor_id_mapping = {
-            "UHJvZHVjdDozNDU=": "229809",
-            "UHJvZHVjdDozNDQ=": "239565", 
-            "UHJvZHVjdDoyNTM=": "236163",
-            "UHJvZHVjdDoyNTI=": "217544",
-            "UHJvZHVjdDoyODQ=": "237610"
-        }
-        
         # Try to find and update the product price from Saleor data
         try:
             if 'answer' in saleor_data:
@@ -173,51 +147,47 @@ class SaleorService:
                 if '### Tool call responses' in answer and '### Final response' in answer:
                     tool_section = answer[answer.find('### Tool call responses'):answer.find('### Final response')]
                     
-                    # Find our product by matching the mapped Saleor ID
-                    for saleor_id, system_id in saleor_id_mapping.items():
-                        if system_id == str(product.product_id):
-                            # Look for this product in the Saleor response
-                            if saleor_id in tool_section:
-                                # Extract price from the response
-                                price_pattern = f"**{product.name}** (ID: {saleor_id})"
-                                if price_pattern in tool_section:
-                                    # Find the price line after this product
-                                    lines = tool_section.split('\n')
-                                    for i, line in enumerate(lines):
-                                        if price_pattern in line:
-                                            # Look for price in next few lines
-                                            for j in range(i+1, min(i+5, len(lines))):
-                                                price_line = lines[j].strip()
-                                                if 'Price:' in price_line and 'USD' in price_line:
-                                                    try:
-                                                        # Extract price value
-                                                        price_str = price_line.split('USD')[1].strip()
-                                                        saleor_price = float(price_str)
-                                                        
-                                                        # Update the product price
-                                                        enriched_product.price = saleor_price
-                                                        logger.info(f"Updated product '{product.name}' (ID: {product.product_id}) price from ${product.price} to ${saleor_price} using Saleor data")
-                                                        break
-                                                    except (ValueError, IndexError):
-                                                        logger.warning(f"Could not parse price from line: {price_line}")
-                                                    break
-                                                elif 'Price:' in price_line:
-                                                    # Alternative price format
-                                                    try:
-                                                        price_str = price_line.split('Price:')[1].strip()
-                                                        if 'USD' in price_str:
-                                                            price_str = price_str.split('USD')[1].strip()
-                                                        saleor_price = float(price_str)
-                                                        
-                                                        # Update the product price
-                                                        enriched_product.price = saleor_price
-                                                        logger.info(f"Updated product '{product.name}' (ID: {product.product_id}) price from ${product.price} to ${saleor_price} using Saleor data (alternative format)")
-                                                        break
-                                                    except (ValueError, IndexError):
-                                                        logger.warning(f"Could not parse price from line (alternative format): {price_line}")
-                                                    break
+                    saleor_id = str(product.product_id)
+                    if saleor_id in tool_section:
+                        # Extract price from the response
+                        price_pattern = f"**{product.name}** (ID: {saleor_id})"
+                        if price_pattern in tool_section:
+                            # Find the price line after this product
+                            lines = tool_section.split('\n')
+                            for i, line in enumerate(lines):
+                                if price_pattern in line:
+                                    # Look for price in next few lines
+                                    for j in range(i+1, min(i+5, len(lines))):
+                                        price_line = lines[j].strip()
+                                        if 'Price:' in price_line and 'USD' in price_line:
+                                            try:
+                                                # Extract price value
+                                                price_str = price_line.split('USD')[1].strip()
+                                                saleor_price = float(price_str)
+                                                
+                                                # Update the product price
+                                                enriched_product.price = saleor_price
+                                                logger.info(f"Updated product '{product.name}' (ID: {product.product_id}) price from ${product.price} to ${saleor_price} using Saleor data")
+                                                break
+                                            except (ValueError, IndexError):
+                                                logger.warning(f"Could not parse price from line: {price_line}")
                                             break
-                            break
+                                        elif 'Price:' in price_line:
+                                            # Alternative price format
+                                            try:
+                                                price_str = price_line.split('Price:')[1].strip()
+                                                if 'USD' in price_str:
+                                                    price_str = price_str.split('USD')[1].strip()
+                                                saleor_price = float(price_str)
+                                                
+                                                # Update the product price
+                                                enriched_product.price = saleor_price
+                                                logger.info(f"Updated product '{product.name}' (ID: {product.product_id}) price from ${product.price} to ${saleor_price} using Saleor data (alternative format)")
+                                                break
+                                            except (ValueError, IndexError):
+                                                logger.warning(f"Could not parse price from line (alternative format): {price_line}")
+                                            break
+                                    break
                     else:
                         logger.info(f"No Saleor price found for product '{product.name}' (ID: {product.product_id}), keeping original price: ${product.price}")
                         

@@ -36,7 +36,7 @@ class SaleorConfig(BaseSettings):
 
     host: str = Field(default="localhost", description="Saleor API server host")
     port: int = Field(default=8000, description="Saleor API server port")
-    timeout: int = Field(default=30, description="Request timeout in seconds")
+    timeout: int = Field(default=180, description="Request timeout in seconds")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

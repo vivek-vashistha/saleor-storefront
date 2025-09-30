@@ -717,7 +717,7 @@ class Neo4jProductRepository(IProductRepository):
                prod.brand AS brand,
                prod.canonicalUrl AS url,
                prod.slug AS slug,
-               coalesce(prod.image, prod.image_url) AS image_url,
+               prod.image AS image_url,
                prod.embedding AS embedding,
                description_text AS description_text,
                category_name AS category_name,

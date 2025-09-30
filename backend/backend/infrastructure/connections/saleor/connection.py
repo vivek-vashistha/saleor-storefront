@@ -51,7 +51,7 @@ class SaleorConnection(ISaleorConnection):
                     logger.info(f"Response: {result}")
                     return result
                 else:
-                    logger.warning(f"Saleor API request failed with status {response.status}: {endpoint}")
+                    logger.info(f"Saleor API request failed with status {response.status}: {endpoint}   ------ {response}")
                     return None
                     
         except Exception as e:
@@ -162,10 +162,11 @@ class SaleorConnection(ISaleorConnection):
         logger.info(f"Fetching batch details for {len(product_ids)} products")
         
         # Use the orders endpoint with just product IDs (like test script)
+        import json
         data = {
             "question": f"fetch product data based on the ids",
             "session_id": "product_lookup",
-            "kg_products": product_ids  # Send as JSON string like test script
+            "kg_products": json.dumps(product_ids)  # match working test client format
         }
         
         logger.info(f"Sending batch request to Saleor with {len(product_ids)} product IDs: {product_ids}")

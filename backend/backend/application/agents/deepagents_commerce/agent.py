@@ -71,7 +71,7 @@ def create_agent_with_model(model):
         instructions=INSTRUCTIONS,
         subagents=SUBAGENTS,
         model=model,
-        # tool_configs can enforce human-in-the-loop on emit_recommendations if you want
+        # Remove human-in-the-loop requirement for emit_recommendations to allow automatic execution
         tool_configs={"emit_recommendations": True}
     )
     agent.checkpointer = InMemorySaver()

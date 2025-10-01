@@ -89,9 +89,25 @@ class DeepAgentWorkflow:
                 elif event_type == "response":
                     # Handle final response with recommendations
                     self._handle_response_event(event, state)
+                elif event_type == "tool":
+                    # Handle direct tool events
+                    self._handle_tool_event(event, state)
                 else:
                     logger.info(f"Unhandled event type: {event_type}")
             logger.info("Deep agent workflow completed successfully")
+            
+            # Ensure we have a final message if none was generated
+            if not state.messages or not any(msg.get('type') == 'ai' for msg in state.messages[-3:]):
+                # Generate a final message if no AI message was created
+                if state.product_bundles:
+                    final_message = "I've curated these intelligent product bundles for you based on your needs. Each bundle is designed to provide comprehensive support for your wellness goals."
+                    state.add_message(final_message, is_human=False)
+                    logger.info("Added fallback final message to state")
+                elif state.referenced_products:
+                    final_message = "Here are some product recommendations that align with your needs and preferences."
+                    state.add_message(final_message, is_human=False)
+                    logger.info("Added fallback final message to state")
+            
             return state
             
         except Exception as e:
@@ -113,6 +129,8 @@ class DeepAgentWorkflow:
             return "tool_call"
         elif "tool_result" in event or "tool_results" in event:
             return "tool_result"
+        elif "tool" in event:
+            return "tool"
         elif any(key.endswith("Middleware") for key in event.keys()):
             return "middleware"
         elif "messages" in event:
@@ -135,6 +153,12 @@ class DeepAgentWorkflow:
         logger.info(f"Tool call event: {event}")
         # TODO: Add intermediate tool call display
         # This will be used to show what tools the agent is calling
+    
+    def _handle_tool_event(self, event: dict, state: ChatState):
+        """Handle direct tool events."""
+        logger.info(f"Tool event: {event}")
+        # This handles direct tool events that might not be captured by other handlers
+        # For now, just log the event
     
     def _handle_tool_result(self, event: dict, state: ChatState):
         """Handle tool result events (for future intermediate results display)."""

@@ -1,3 +1,4 @@
+import logging
 from typing import Any, List, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -7,6 +8,8 @@ from backend.domain.entities.product import Product
 from backend.domain.entities.product_bundle import ProductBundle
 from backend.domain.entities.search_query import SearchQuery
 from backend.domain.enums import AgentType
+
+logger = logging.getLogger("conversational_commerce")
 
 
 class UserProfile(BaseModel):
@@ -265,8 +268,23 @@ class ChatState(BaseModel):
         Args:
             products: List of products to recommend with this message
         """
+        # Check if we already have similar products to avoid duplicates
+        existing_product_ids = set()
+        for msg in self.messages:
+            if msg.get('type') == 'product_recommendation' and 'recommended_products' in msg:
+                for product in msg['recommended_products']:
+                    if 'product_id' in product:
+                        existing_product_ids.add(product['product_id'])
+        
+        # Filter out products that already exist
+        new_products = [product for product in products if product.product_id not in existing_product_ids]
+        
+        if not new_products:
+            logger.info("No new products to add, skipping duplicate product message")
+            return
+        
         message = ProductRecommendationMessage(
-            content="Here are some product recommendations for you:", recommended_products=products
+            content="Here are some product recommendations for you:", recommended_products=new_products
         )
         self.messages.append(message.model_dump())
 
@@ -276,12 +294,27 @@ class ChatState(BaseModel):
         Args:
             bundles: List of product bundles to recommend with this message
         """
+        # Check if we already have similar bundles to avoid duplicates
+        existing_bundle_ids = set()
+        for msg in self.messages:
+            if msg.get('type') == 'product_bundle_recommendation' and 'recommended_bundles' in msg:
+                for bundle in msg['recommended_bundles']:
+                    if 'bundle_id' in bundle:
+                        existing_bundle_ids.add(bundle['bundle_id'])
+        
+        # Filter out bundles that already exist
+        new_bundles = [bundle for bundle in bundles if bundle.bundle_id not in existing_bundle_ids]
+        
+        if not new_bundles:
+            logger.info("No new bundles to add, skipping duplicate bundle message")
+            return
+        
         # Generate intelligent rationale for the bundles
-        rationale = self._generate_bundle_rationale(bundles)
+        rationale = self._generate_bundle_rationale(new_bundles)
         
         # Create a message that contains the product bundles with rationale
         message = ProductBundleRecommendationMessage(
-            content=rationale, recommended_bundles=bundles
+            content=rationale, recommended_bundles=new_bundles
         )
         self.messages.append(message.model_dump())
     

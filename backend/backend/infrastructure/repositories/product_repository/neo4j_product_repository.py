@@ -593,7 +593,7 @@ class Neo4jProductRepository(IProductRepository):
     async def get_products_by_query(
         self, query: str, num_results: int = 10, user_id: int | None = None, categories: list[str] | None = None
     ) -> list[Product]:
-        """Get products based on a natural language query with enhanced graph-aware search.
+        """Get products based on a natural language query with enhanced graph-aware (hybrid) search.
 
         Args:
             query: Natural language query describing the products to retrieve
@@ -606,51 +606,81 @@ class Neo4jProductRepository(IProductRepository):
 
         """
         def _operation(driver: neo4j.Driver):
-            # Build enhanced Cypher query with graph relationships
-            cypher_query = self._build_enhanced_search_query(query, num_results, categories)
+            # Prefer hybrid (fulltext + vector) if an embedding model is available; otherwise fallback to fulltext
+            use_hybrid = bool(self.embedding_model)
+            logger.info(f"Using hybrid search: ------------------------------------ {use_hybrid}")
+            if use_hybrid:
+                cypher_query = self._build_hybrid_search_query(query, num_results, categories)
+            else:
+                cypher_query = self._build_enhanced_search_query(query, num_results, categories)
             
             with driver.session() as session:
-                result = session.run(cypher_query, {
+                params = {
                     'query': query,
                     'num_results': num_results,
                     'categories': categories or []
-                })
-                
-                products = []
-                for record in result:
+                }
+                if use_hybrid:
+                    # Compute query embedding and set topK candidate count
                     try:
-                        product = Product(
-                            product_id=str(record.get('product_id')),
-                            variant_id=str(record.get('variant_id') or ''),
-                            name=record.get('name') or '',
-                            brand=record.get('brand'),
-                            url=record.get('url'),
-                            slug=record.get('slug'),
-                            image_url=record.get('image_url'),
-                            # categories will be resolved via relations; not projected directly
-                            main_category=None,
-                            main_category_slug=None,
-                            sub_category=None,
-                            sub_category_slug=None,
-                            category_name=record.get('category_name') or None,
-                            category_slug=record.get('category_slug') or None,
-                            # attrs
-                            review_score=None,
-                            review_count=None,
-                            product_type_name=None,
-                            product_type_slug=None,
-                            tax_class=None,
-                            collections=None,
-                            breadcrumbs=[],
-                            short_description=None,
-                            description_text=record.get('description_text') or None,
-                            best_for=[b for b in (record.get('best_for') or []) if b],
-                            embedding=record.get('embedding'),
-                        )
-                        products.append(product)
-                    except Exception as e:
-                        logger.warning(f"Failed to create Product from record: {e}")
-                        continue
+                        query_embedding = self.embedding_model.model.embed_query(query)  # type: ignore[attr-defined]
+                    except Exception:
+                        query_embedding = None
+                        use_hybrid = False
+                    if use_hybrid and query_embedding:
+                        # Fetch wider pool for vector to merge before limiting to num_results
+                        params['embedding'] = query_embedding
+                        params['topK'] = max(num_results * 5, 50)
+                    else:
+                        # Fallback to fulltext query if embedding fails
+                        cypher_query = self._build_enhanced_search_query(query, num_results, categories)
+
+                result = session.run(cypher_query, params)
+                
+                def _parse_records(records):
+                    items: list[Product] = []
+                    for record in records:
+                        try:
+                            product = Product(
+                                product_id=str(record.get('product_id')),
+                                variant_id=str(record.get('variant_id') or ''),
+                                name=record.get('name') or '',
+                                brand=record.get('brand'),
+                                url=record.get('url'),
+                                slug=record.get('slug'),
+                                image_url=record.get('image_url'),
+                                main_category=None,
+                                main_category_slug=None,
+                                sub_category=None,
+                                sub_category_slug=None,
+                                category_name=record.get('category_name') or None,
+                                category_slug=record.get('category_slug') or None,
+                                review_score=None,
+                                review_count=None,
+                                product_type_name=None,
+                                product_type_slug=None,
+                                tax_class=None,
+                                collections=None,
+                                breadcrumbs=[],
+                                short_description=None,
+                                description_text=record.get('description_text') or None,
+                                best_for=[b for b in (record.get('best_for') or []) if b],
+                                embedding=record.get('embedding'),
+                            )
+                            items.append(product)
+                        except Exception as e:
+                            logger.warning(f"Failed to create Product from record: {e}")
+                            continue
+                    return items
+
+                products = _parse_records(result)
+
+                # Fallback: if category filter produced empty results, retry without category constraints
+                if not products and (categories or []):
+                    params_no_cat = {**params, 'categories': []}
+                    logger.info("Hybrid/FT search returned 0; retrying without category filter")
+                    result2 = session.run(cypher_query, params_no_cat)
+                    products = _parse_records(result2)
                 
                 logger.info(f"Retrieved {len(products)} products with enhanced graph search")
                 return products
@@ -679,17 +709,29 @@ class Neo4jProductRepository(IProductRepository):
         WITH node AS prod, score
         """
         
-        # Category filtering and projection (works whether categories provided or not)
+        # Category filtering and projection (match across Category/SubCategory/MainCategory, allow partial contains)
         cypher_query += """
         OPTIONAL MATCH (prod)-[:IN_CATEGORY]->(c:Category)
+        OPTIONAL MATCH (c)-[:CHILD_OF]->(sc:SubCategory)
+        OPTIONAL MATCH (sc)-[:CHILD_OF]->(mc:MainCategory)
         WITH prod, score,
              collect(distinct c.name) AS c_names,
-             collect(distinct c.code) AS c_codes
-        WITH prod, score, c_names, c_codes,
+             collect(distinct c.code) AS c_codes,
+             collect(distinct sc.name) AS sc_names,
+             collect(distinct sc.code) AS sc_codes,
+             collect(distinct mc.name) AS mc_names,
+             collect(distinct mc.code) AS mc_codes
+        WITH prod, score, c_names, c_codes, sc_names, sc_codes, mc_names, mc_codes,
              CASE
                WHEN size($categories) = 0 THEN true
-               ELSE any(cat IN $categories WHERE any(n IN c_names WHERE toLower(n) = toLower(cat))
-                                         OR any(cd IN c_codes WHERE toLower(cd) = toLower(cat)))
+               ELSE any(cat IN $categories WHERE
+                    any(n IN c_names  WHERE toLower(n)  CONTAINS toLower(cat)) OR
+                    any(cd IN c_codes WHERE toLower(cd) CONTAINS toLower(cat)) OR
+                    any(n IN sc_names WHERE toLower(n)  CONTAINS toLower(cat)) OR
+                    any(cd IN sc_codes WHERE toLower(cd) CONTAINS toLower(cat)) OR
+                    any(n IN mc_names WHERE toLower(n)  CONTAINS toLower(cat)) OR
+                    any(cd IN mc_codes WHERE toLower(cd) CONTAINS toLower(cat))
+               )
              END AS cat_ok
         WHERE cat_ok
         """
@@ -728,6 +770,94 @@ class Neo4jProductRepository(IProductRepository):
         LIMIT $num_results
         """
         
+        return cypher_query
+
+    def _build_hybrid_search_query(self, query: str, num_results: int, categories: List[str] | None) -> str:
+        """Build a hybrid search Cypher combining fulltext and vector scores.
+
+        - Fulltext: db.index.fulltext.queryNodes(self.fulltext_index_name, $query)
+        - Vector:   db.index.vector.queryNodes(self.vector_index_name, $topK, $embedding)
+        - Combine:  hybridScore = 0.6*ftScore + 0.4*vecScore (0.0 if missing)
+        - Apply same projection as enhanced search, then ORDER BY hybridScore
+        """
+        cypher_query = f"""
+        // Fulltext candidates
+        CALL db.index.fulltext.queryNodes('{self.fulltext_index_name}', $query) YIELD node AS ftNode, score AS ftScore
+        WITH collect({{node: ftNode, score: ftScore}}) AS ftCandidates
+
+        // Vector candidates
+        CALL db.index.vector.queryNodes('{self.vector_index_name}', $topK, $embedding)
+        YIELD node AS vecNode, score AS vecScore
+        WITH ftCandidates, collect({{node: vecNode, score: vecScore}}) AS vecCandidates
+
+        // Union nodes
+        WITH [x IN ftCandidates | x.node] + [y IN vecCandidates | y.node] AS allNodes,
+             ftCandidates, vecCandidates
+        UNWIND allNodes AS prod
+
+        // Attach scores
+        WITH prod,
+             coalesce( [x IN ftCandidates WHERE x.node = prod | x.score][0], 0.0 ) AS ftScore,
+             coalesce( [y IN vecCandidates WHERE y.node = prod | y.score][0], 0.0 ) AS vecScore
+        WITH prod, ftScore, vecScore, (0.6*ftScore + 0.4*vecScore) AS hybridScore
+
+        // Optional category and attribute matches (include SubCategory/MainCategory; allow partial contains)
+        OPTIONAL MATCH (prod)-[:IN_CATEGORY]->(c:Category)
+        OPTIONAL MATCH (c)-[:CHILD_OF]->(sc:SubCategory)
+        OPTIONAL MATCH (sc)-[:CHILD_OF]->(mc:MainCategory)
+        WITH prod, hybridScore,
+             collect(distinct c.name) AS c_names,
+             collect(distinct c.code) AS c_codes,
+             collect(distinct sc.name) AS sc_names,
+             collect(distinct sc.code) AS sc_codes,
+             collect(distinct mc.name) AS mc_names,
+             collect(distinct mc.code) AS mc_codes
+        WITH prod, hybridScore, c_names, c_codes, sc_names, sc_codes, mc_names, mc_codes,
+             CASE
+               WHEN size($categories) = 0 THEN true
+               ELSE any(cat IN $categories WHERE
+                    any(n IN c_names  WHERE toLower(n)  CONTAINS toLower(cat)) OR
+                    any(cd IN c_codes WHERE toLower(cd) CONTAINS toLower(cat)) OR
+                    any(n IN sc_names WHERE toLower(n)  CONTAINS toLower(cat)) OR
+                    any(cd IN sc_codes WHERE toLower(cd) CONTAINS toLower(cat)) OR
+                    any(n IN mc_names WHERE toLower(n)  CONTAINS toLower(cat)) OR
+                    any(cd IN mc_codes WHERE toLower(cd) CONTAINS toLower(cat))
+               )
+             END AS cat_ok
+        WHERE cat_ok
+
+        OPTIONAL MATCH (prod)-[:HAS_VARIANT]->(v:Variant)
+        OPTIONAL MATCH (v)-[:HAS_ATTR]->(bf:AttrValue {{key:'best_for'}})
+        OPTIONAL MATCH (v)-[:HAS_ATTR]->(descAV:AttrValue {{key:'description_text'}})
+        OPTIONAL MATCH (v)-[:HAS_ATTR]->(shortAV:AttrValue {{key:'short_description'}})
+
+        WITH prod, hybridScore, c_names, c_codes,
+             collect(distinct bf.value_str) AS best_for,
+             coalesce(
+                 head(collect(distinct descAV.value_str)),
+                 head(collect(distinct shortAV.value_str)),
+                 ''
+             ) AS description_text,
+             head(collect(distinct v.variantId)) AS variant_id,
+             coalesce(head(c_names), '') AS category_name,
+             coalesce(head(c_codes), '') AS category_slug
+
+        RETURN DISTINCT prod.productId AS product_id,
+               variant_id AS variant_id,
+               prod.name AS name,
+               prod.brand AS brand,
+               prod.canonicalUrl AS url,
+               prod.slug AS slug,
+               prod.image AS image_url,
+               prod.embedding AS embedding,
+               description_text AS description_text,
+               category_name AS category_name,
+               category_slug AS category_slug,
+               best_for AS best_for,
+               hybridScore AS similarityScore
+        ORDER BY similarityScore DESC
+        LIMIT $num_results
+        """
         return cypher_query
 
     # async def get_related_products(self, product_id: int, num_results: int = 5) -> list[Product]:

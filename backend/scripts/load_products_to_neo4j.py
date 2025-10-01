@@ -9,6 +9,7 @@ from backend.domain.entities import Product
 from backend.infrastructure.connections import Neo4jConfig, Neo4jConnection
 from backend.infrastructure.repositories import IProductRepository, Neo4jProductRepository
 from backend.settings import AISettings, Neo4jSettings
+from langchain_openai import OpenAIEmbeddings
 
 # Configure logging
 logging.basicConfig(
@@ -159,6 +160,28 @@ def load_products_from_csv(csv_path: Path) -> list[Product]:
     # pprint(products)
     return products
 
+
+def _build_embedding_text(p: Product) -> str:
+    """Compose a semantically rich text for embedding from product fields."""
+    parts: list[str] = []
+    if p.name:
+        parts.append(p.name)
+    if p.brand:
+        parts.append(f"Brand: {p.brand}")
+    categories: list[str] = []
+    for c in [p.main_category, p.sub_category, p.category_name, p.category_slug]:
+        if c:
+            categories.append(str(c))
+    if categories:
+        parts.append("Categories: " + " | ".join(categories))
+    if p.best_for:
+        parts.append("Best for: " + ", ".join([str(x) for x in p.best_for if x]))
+    if p.description_text:
+        parts.append(p.description_text)
+    if p.breadcrumbs:
+        parts.append("Breadcrumbs: " + " > ".join([str(x) for x in p.breadcrumbs if x]))
+    return "\n".join(parts)
+
 async def setup_db():
     """Load products into a Neo4j product repository with enhanced graph relationships."""
     repository = get_repository()
@@ -187,6 +210,27 @@ async def setup_db():
     logger.info(f"Loading products from {products_csv}")
     products = load_products_from_csv(products_csv)
     logger.info(f"Loaded {len(products)} products")
+
+    # Generate embeddings for products that don't have one
+    missing = [(i, p) for i, p in enumerate(products) if not p.embedding]
+    if missing:
+        ai_settings = AISettings()
+        configured_model = getattr(ai_settings.EMBEDDING_MODEL_NAME, "value", str(ai_settings.EMBEDDING_MODEL_NAME))
+        model_name = configured_model or "text-embedding-3-small"
+        if model_name != "text-embedding-3-small":
+            logger.warning(
+                "Embedding model '%s' may not be 1536-d. Overriding to 'text-embedding-3-small' to match Neo4j index.",
+                model_name,
+            )
+            model_name = "text-embedding-3-small"
+
+        logger.info("Generating embeddings for %d products using model '%s'", len(missing), model_name)
+        embedder = OpenAIEmbeddings(model=model_name, api_key=ai_settings.OPENAI_API_KEY)
+        texts = [_build_embedding_text(p) for _, p in missing]
+        vectors = embedder.embed_documents(texts)
+        for (idx, _), vec in zip(missing, vectors):
+            products[idx].embedding = vec
+        logger.info("Embeddings generated for %d products", len(missing))
 
     # Initialize the repository with the products (now with enhanced batch processing and graph relationships)
     logger.info("Initializing Neo4j repository with enhanced graph relationships...")

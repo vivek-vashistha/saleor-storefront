@@ -158,18 +158,69 @@ def record_conversation_memory(user_id: str, messages: List[Dict[str, Any]], con
 def product_search_for_query(query: str, categories: Optional[List[str]] = None, max_num_results: int = 6) -> List[Dict[str, Any]]:
     """
     Search catalog: turns free text + categories into your SearchQuery and returns Product[] as dicts.
+    
+    AVAILABLE CATEGORIES IN DATABASE (use exact names):
+    - "Gut Health" (probiotics, digestive health, intestinal balance)
+    - "Probiotics" (probiotic supplements, gut bacteria)
+    - "Sleep" (melatonin, sleep aids, sleep support)
+    - "Magnesium" (magnesium supplements, muscle relaxation)
+    - "Vitamin B" (B-complex vitamins, energy, metabolism)
+    - "Bone, Joint & Cartilage" (collagen, joint health, bone support)
+    - "Weight Management" (MCT oil, weight loss, ketogenic)
+    - "Amino Acids" (L-arginine, L-citrulline, protein building blocks)
+    - "Antioxidants" (CoQ10, free radical protection)
+    - "Adaptogens" (ashwagandha, stress support, cortisol)
+    - "Baking, Flour & Mixes" (almond flour, coconut flour, keto baking)
+    - "Children's Health" (kids' supplements, chewable vitamins)
+    - "Hair, Skin & Nails" (beauty supplements, collagen)
+    - "Brain & Cognitive" (mental clarity, focus, memory)
+    - "Creatine" (muscle building, athletic performance)
+    - "Medicine Cabinet" (homeopathic, flu relief)
+    - "Body Butter" (skincare, moisturizers)
+    - "Grocery" (food items, pantry staples)
+    
+    CATEGORY MAPPING GUIDE:
+    - For gut health/digestive issues → "Gut Health" or "Probiotics"
+    - For sleep problems → "Sleep"
+    - For energy/fatigue → "Vitamin B" or "Magnesium"
+    - For joint pain → "Bone, Joint & Cartilage"
+    - For weight loss → "Weight Management"
+    - For stress/anxiety → "Adaptogens"
+    - For baking/cooking → "Baking, Flour & Mixes"
+    - For kids' needs → "Children's Health"
+    - For beauty/skin → "Hair, Skin & Nails"
+    
+    Use these exact category names or leave categories empty for broader search.
     """
     if not product_service:
         return []
     
     import asyncio
+    import logging
+    logger = logging.getLogger("conversational_commerce")
+    
+    # First try with the provided categories
     sq = SearchQuery(query=query, categories=categories or [])
     try:
         loop = asyncio.get_event_loop()
         products: List[Product] = loop.run_until_complete(product_service.get_products_for_query(sq, max_num_results=max_num_results))
+        
+        # If no products found with categories, try without categories as fallback
+        if not products and categories:
+            logger.info(f"No products found with categories {categories}, trying without category filter")
+            sq_no_cat = SearchQuery(query=query, categories=[])
+            products = loop.run_until_complete(product_service.get_products_for_query(sq_no_cat, max_num_results=max_num_results))
+            
         return [p.model_dump() for p in products]
     except RuntimeError:
         products: List[Product] = asyncio.run(product_service.get_products_for_query(sq, max_num_results=max_num_results))
+        
+        # If no products found with categories, try without categories as fallback
+        if not products and categories:
+            logger.info(f"No products found with categories {categories}, trying without category filter")
+            sq_no_cat = SearchQuery(query=query, categories=[])
+            products = asyncio.run(product_service.get_products_for_query(sq_no_cat, max_num_results=max_num_results))
+            
         return [p.model_dump() for p in products]
 
 @tool("intelligent_product_bundles", return_direct=False)

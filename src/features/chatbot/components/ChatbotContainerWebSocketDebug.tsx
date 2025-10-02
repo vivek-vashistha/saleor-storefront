@@ -262,6 +262,8 @@ export const ChatbotContainerWebSocketDebug: React.FC = () => {
 									productMessageTimestamp={productMessageTimestamp}
 									messagesEndRef={messagesEndRef as React.RefObject<HTMLDivElement>}
 									className="flex-1 overflow-y-auto"
+									currentThinking={currentThinking}
+									toolCalls={toolCalls}
 								/>
 
 								{/* input at bottom */}

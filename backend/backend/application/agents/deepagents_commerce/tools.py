@@ -192,35 +192,73 @@ def product_search_for_query(query: str, categories: Optional[List[str]] = None,
     
     Use these exact category names or leave categories empty for broader search.
     """
+    import time
+    import logging
+    logger = logging.getLogger("conversational_commerce")
+    
+    start_time = time.time()
+    logger.info(f"🔍 [TOOL] product_search_for_query started at {start_time:.2f}s")
+    logger.info(f"🔍 [TOOL] Query: {query}")
+    logger.info(f"🔍 [TOOL] Categories: {categories}")
+    logger.info(f"🔍 [TOOL] Max results: {max_num_results}")
+    
+    # Send progress update (non-blocking)
+    try:
+        from backend.presentation.api.websocket.connection_manager import manager
+        import asyncio
+        # Create a task to send the update without blocking
+        asyncio.create_task(manager.send_tool_call_update("product_search", "started", {"query": query, "categories": categories}))
+    except Exception as e:
+        logger.warning(f"Failed to send progress update: {e}")
+    
+    # Track database query time
+    db_start_time = time.time()
+    
     if not product_service:
+        logger.warning("🔍 [TOOL] product_service is None, returning empty list")
         return []
     
     import asyncio
-    import logging
-    logger = logging.getLogger("conversational_commerce")
     
     # First try with the provided categories
     sq = SearchQuery(query=query, categories=categories or [])
     try:
         loop = asyncio.get_event_loop()
+        logger.info(f"🔍 [TOOL] Starting database query at {time.time():.2f}s")
         products: List[Product] = loop.run_until_complete(product_service.get_products_for_query(sq, max_num_results=max_num_results))
+        db_end_time = time.time()
+        logger.info(f"🔍 [TOOL] Database query completed in {db_end_time - db_start_time:.2f}s")
         
         # If no products found with categories, try without categories as fallback
         if not products and categories:
-            logger.info(f"No products found with categories {categories}, trying without category filter")
+            logger.info(f"🔍 [TOOL] No products found with categories {categories}, trying without category filter")
+            fallback_start = time.time()
             sq_no_cat = SearchQuery(query=query, categories=[])
             products = loop.run_until_complete(product_service.get_products_for_query(sq_no_cat, max_num_results=max_num_results))
-            
+            fallback_end = time.time()
+            logger.info(f"🔍 [TOOL] Fallback query completed in {fallback_end - fallback_start:.2f}s")
+        
+        end_time = time.time()
+        logger.info(f"🔍 [TOOL] product_search_for_query completed in {end_time - start_time:.2f}s, found {len(products)} products")
+        
+        # Send completion update (non-blocking)
+        try:
+            asyncio.create_task(manager.send_tool_call_update("product_search", "completed", {"products_found": len(products), "duration": end_time - start_time}))
+        except Exception as e:
+            logger.warning(f"Failed to send completion update: {e}")
+        
         return [p.model_dump() for p in products]
     except RuntimeError:
         products: List[Product] = asyncio.run(product_service.get_products_for_query(sq, max_num_results=max_num_results))
         
         # If no products found with categories, try without categories as fallback
         if not products and categories:
-            logger.info(f"No products found with categories {categories}, trying without category filter")
+            logger.info(f"🔍 [TOOL] No products found with categories {categories}, trying without category filter")
             sq_no_cat = SearchQuery(query=query, categories=[])
             products = asyncio.run(product_service.get_products_for_query(sq_no_cat, max_num_results=max_num_results))
-            
+        
+        end_time = time.time()
+        logger.info(f"🔍 [TOOL] product_search_for_query completed in {end_time - start_time:.2f}s, found {len(products)} products")
         return [p.model_dump() for p in products]
 
 @tool("intelligent_product_bundles", return_direct=False)
@@ -234,6 +272,24 @@ def intelligent_product_bundles(
     Compose bundles using ProductService.get_intelligent_product_bundles.
     user_profile expects keys like: budget_range, health_conditions, product_preferences, activity_preferences.
     """
+    import time
+    import logging
+    logger = logging.getLogger("conversational_commerce")
+    
+    start_time = time.time()
+    logger.info(f"📦 [TOOL] intelligent_product_bundles started at {start_time:.2f}s")
+    logger.info(f"📦 [TOOL] Queries: {queries}")
+    logger.info(f"📦 [TOOL] Categories per query: {categories_per_query}")
+    logger.info(f"📦 [TOOL] User profile: {user_profile}")
+    logger.info(f"📦 [TOOL] Max bundles: {max_bundles}")
+    
+    # Send progress update (non-blocking)
+    try:
+        from backend.presentation.api.websocket.connection_manager import manager
+        import asyncio
+        asyncio.create_task(manager.send_tool_call_update("bundle_creation", "started", {"queries": queries, "max_bundles": max_bundles}))
+    except Exception as e:
+        logger.warning(f"Failed to send bundle progress update: {e}")
     if not product_service:
         return []
     
@@ -254,14 +310,29 @@ def intelligent_product_bundles(
     profile_obj = _ProfileShim(user_profile or {}) if user_profile else None
     try:
         loop = asyncio.get_event_loop()
+        logger.info(f"📦 [TOOL] Starting bundle creation at {time.time():.2f}s")
         bundles: List[ProductBundle] = loop.run_until_complete(product_service.get_intelligent_product_bundles(
             search_queries=sqs, user_profile=profile_obj, max_bundles=max_bundles
         ))
+        bundle_end_time = time.time()
+        logger.info(f"📦 [TOOL] Bundle creation completed in {bundle_end_time - start_time:.2f}s")
+        
+        end_time = time.time()
+        logger.info(f"📦 [TOOL] intelligent_product_bundles completed in {end_time - start_time:.2f}s, found {len(bundles)} bundles")
+        
+        # Send completion update (non-blocking)
+        try:
+            asyncio.create_task(manager.send_tool_call_update("bundle_creation", "completed", {"bundles_created": len(bundles), "duration": end_time - start_time}))
+        except Exception as e:
+            logger.warning(f"Failed to send bundle completion update: {e}")
+        
         return [b.model_dump() for b in bundles]
     except RuntimeError:
         bundles: List[ProductBundle] = asyncio.run(product_service.get_intelligent_product_bundles(
             search_queries=sqs, user_profile=profile_obj, max_bundles=max_bundles
         ))
+        end_time = time.time()
+        logger.info(f"📦 [TOOL] intelligent_product_bundles completed in {end_time - start_time:.2f}s, found {len(bundles)} bundles")
         return [b.model_dump() for b in bundles]
 
 # -------------------------
@@ -295,6 +366,24 @@ def emit_recommendations(
     """
     Final payload for your UI: concise assistant message plus product bundles and/or individual products.
     """
+    import time
+    import logging
+    logger = logging.getLogger("conversational_commerce")
+    
+    start_time = time.time()
+    logger.info(f"📤 [TOOL] emit_recommendations started at {start_time:.2f}s")
+    logger.info(f"📤 [TOOL] Message length: {len(message)}")
+    logger.info(f"📤 [TOOL] Bundles count: {len(bundles) if bundles else 0}")
+    logger.info(f"📤 [TOOL] Products count: {len(products) if products else 0}")
+    logger.info(f"📤 [TOOL] Assumptions count: {len(assumptions) if assumptions else 0}")
+    
+    # Send progress update (non-blocking)
+    try:
+        from backend.presentation.api.websocket.connection_manager import manager
+        import asyncio
+        asyncio.create_task(manager.send_tool_call_update("finalize_recommendations", "started", {"message_length": len(message), "bundles": len(bundles) if bundles else 0, "products": len(products) if products else 0}))
+    except Exception as e:
+        logger.warning(f"Failed to send finalize progress update: {e}")
     result = {
         "message": message,
         "assumptions": assumptions or []
@@ -305,5 +394,14 @@ def emit_recommendations(
     
     if products:
         result["products"] = products
+    
+    end_time = time.time()
+    logger.info(f"📤 [TOOL] emit_recommendations completed in {end_time - start_time:.2f}s")
+    
+    # Send completion update (non-blocking)
+    try:
+        asyncio.create_task(manager.send_tool_call_update("finalize_recommendations", "completed", {"duration": end_time - start_time, "result_size": len(str(result))}))
+    except Exception as e:
+        logger.warning(f"Failed to send finalize completion update: {e}")
     
     return result

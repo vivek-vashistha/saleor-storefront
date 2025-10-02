@@ -44,10 +44,27 @@ class DeepAgentWorkflow:
         # Create the agent with the proper model
         self.agent = create_agent_with_model(llm)
     
-    async def run(self, state: ChatState) -> ChatState:
+    async def run(self, state: ChatState, session_id: str = None) -> ChatState:
         """Run the deep agent workflow on the chat state."""
+        import time
+        start_time = time.time()
+        
         try:
-            logger.info("Starting deep agent workflow")
+            logger.info("🚀 Starting deep agent workflow")
+            logger.info(f"🚀 Session ID received: {session_id}")
+            logger.info(f"🚀 Session ID type: {type(session_id)}")
+            
+            # Send initial progress message if session_id is available
+            if session_id:
+                try:
+                    from backend.presentation.api.websocket.connection_manager import manager
+                    logger.info(f"🚀 Sending initial progress update to session {session_id}")
+                    await manager.send_thinking_update(session_id, "🤖 Analyzing your request...")
+                    logger.info(f"🚀 Initial progress update sent successfully")
+                except Exception as e:
+                    logger.warning(f"Failed to send initial progress update: {e}")
+            else:
+                logger.warning("🚀 No session_id provided, skipping progress updates")
             
             # Convert chat state to agent format
             messages = []
@@ -57,20 +74,61 @@ class DeepAgentWorkflow:
                 elif msg.get('type') == 'ai':
                     messages.append({"role": "assistant", "content": msg.get('content', '')})
             
-            # Create thread configuration
-            thread_cfg = {"configurable": {"thread_id": f"user_{state.user_id}"}}
+                # Create thread configuration with timestamp to ensure uniqueness
+                import time
+                thread_cfg = {"configurable": {"thread_id": f"user_{state.user_id}_{int(time.time())}"}}
             
             # Run the agent
-            logger.info(f"Running deep agent with {len(messages)} messages")
+            logger.info(f"🚀 Running deep agent with {len(messages)} messages")
+            agent_start_time = time.time()
             
-            # Stream the agent response
-            for event in self.agent.stream({"messages": messages}, config=thread_cfg):
-                logger.info(f"Deep agent stream event: {event}")
+            # Send progress update if session_id is available
+            if session_id:
+                try:
+                    logger.info(f"🚀 Sending search progress update to session {session_id}")
+                    await manager.send_thinking_update(session_id, "🔍 Searching for products...")
+                    logger.info(f"🚀 Search progress update sent successfully")
+                except Exception as e:
+                    logger.warning(f"Failed to send search progress update: {e}")
+            
+            # Stream the agent response and process events in real-time
+            event_count = 0
+            async for event in self.agent.astream({"messages": messages}, config=thread_cfg):
+                event_count += 1
+                event_time = time.time()
+                logger.info(f"🚀 Deep agent stream event #{event_count} at {event_time - start_time:.2f}s: {event}")
                 
                 # Handle different event types based on logs analysis
                 event_type = self._get_event_type(event)
-                logger.info(f"Event type: {event_type}")
+                logger.info(f"🚀 Event type: {event_type}")
                 
+                # Send thinking updates immediately when tools are called
+                if session_id and event_type == "model_request":
+                    # Check if this is a tool call request
+                    if "tool_calls" in str(event):
+                        try:
+                            # Extract tool calls from the event
+                            if hasattr(event, 'get') and event.get('model_request'):
+                                model_request = event['model_request']
+                                if hasattr(model_request, 'get') and model_request.get('messages'):
+                                    for message in model_request['messages']:
+                                        if hasattr(message, 'tool_calls') and message.tool_calls:
+                                            for tool_call in message.tool_calls:
+                                                tool_name = tool_call.get('name', 'unknown')
+                                                logger.info(f"🚀 Tool call detected: {tool_name}")
+                                                if tool_name == 'product_search_for_query':
+                                                    logger.info(f"🚀 Sending search progress update to session {session_id}")
+                                                    await manager.send_thinking_update(session_id, "🔍 Searching for products...")
+                                                elif tool_name == 'intelligent_product_bundles':
+                                                    logger.info(f"🚀 Sending bundle creation update to session {session_id}")
+                                                    await manager.send_thinking_update(session_id, "📦 Creating intelligent bundles...")
+                                                elif tool_name == 'emit_recommendations':
+                                                    logger.info(f"🚀 Sending finalization update to session {session_id}")
+                                                    await manager.send_thinking_update(session_id, "✍️ Generating recommendations...")
+                        except Exception as e:
+                            logger.warning(f"Failed to send tool call progress update: {e}")
+                
+                # Process the event
                 if event_type == "model_request":
                     # Handle AI model responses
                     self._handle_model_request(event, state)
@@ -93,8 +151,20 @@ class DeepAgentWorkflow:
                     # Handle direct tool events
                     self._handle_tool_event(event, state)
                 else:
-                    logger.info(f"Unhandled event type: {event_type}")
-            logger.info("Deep agent workflow completed successfully")
+                    logger.info(f"🚀 Unhandled event type: {event_type}")
+            
+            agent_end_time = time.time()
+            logger.info(f"🚀 Agent processing completed in {agent_end_time - agent_start_time:.2f}s")
+            logger.info("🚀 Deep agent workflow completed successfully")
+            
+            # Send completion message if session_id is available
+            if session_id:
+                try:
+                    logger.info(f"🚀 Sending completion update to session {session_id}")
+                    await manager.send_thinking_update(session_id, "✅ Recommendations ready!")
+                    logger.info(f"🚀 Completion update sent successfully")
+                except Exception as e:
+                    logger.warning(f"Failed to send completion update: {e}")
             
             # Ensure we have a final message if none was generated
             if not state.messages or not any(msg.get('type') == 'ai' for msg in state.messages[-3:]):
@@ -112,7 +182,48 @@ class DeepAgentWorkflow:
             
         except Exception as e:
             logger.error(f"Error in deep agent workflow: {e}", exc_info=True)
-            # Add error message to state
+            
+            # Check if it's a tool call completion error
+            if "tool_call_id" in str(e) and "must be followed by tool messages" in str(e):
+                logger.warning("Detected incomplete tool call error, clearing conversation and retrying")
+                # Clear the conversation and retry with just the current message
+                current_message = state.messages[-1] if state.messages else None
+                if current_message:
+                    state.messages = [current_message] # Reset messages to only the current one
+                    # Use a completely fresh thread ID
+                    import time
+                    fresh_thread_cfg = {"configurable": {"thread_id": f"fresh_{state.user_id}_{int(time.time())}"}}
+                    logger.info(f"Retrying agent with fresh thread: {fresh_thread_cfg}")
+                    try:
+                        async for event in self.agent.astream({"messages": messages}, config=fresh_thread_cfg):
+                            logger.info(f"Deep agent retry stream event: {event}")
+                            event_type = self._get_event_type(event)
+                            if event_type == "model_request":
+                                self._handle_model_request(event, state)
+                            elif event_type == "tool_call":
+                                self._handle_tool_call(event, state)
+                            elif event_type == "tool_result":
+                                self._handle_tool_result(event, state)
+                            elif event_type == "middleware":
+                                self._handle_middleware_event(event, state)
+                            elif event_type == "messages":
+                                self._handle_messages_event(event, state)
+                            elif event_type == "response":
+                                self._handle_response_event(event, state)
+                            elif event_type == "tool":
+                                self._handle_tool_event(event, state)
+                            else:
+                                logger.info(f"Unhandled event type in retry: {event_type}")
+                        return state
+                    except Exception as retry_e:
+                        logger.error(f"Error during agent retry: {retry_e}", exc_info=True)
+                        state.add_message(
+                            "I'm sorry, I encountered an error even after retrying. Please try again.",
+                            is_human=False
+                        )
+                        return state
+            
+            # Add error message to state for unhandled exceptions
             state.add_message(
                 "I'm sorry, I encountered an error while processing your request. Please try again.",
                 is_human=False

@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { initializeSession } from "../api/sessionApi";
 import { sendMessage as sendMessageApi } from "../api/messageApi";
-import { type Message } from "../types/Message";
+import { type Message } from "../types";
 import { useWebSocketDebug, type WebSocketMessage } from "./useWebSocketDebug";
 import { useUser } from "@/context/UserContext";
 
@@ -53,6 +53,15 @@ export const useChatSessionWebSocketDebug = ({
 	const [streamingMessage, setStreamingMessage] = useState<string>("");
 	const [isStreaming, setIsStreaming] = useState(false);
 
+	// Debug: Log state changes
+	useEffect(() => {
+		console.log("🔔 Frontend Debug: currentThinking changed:", currentThinking);
+	}, [currentThinking]);
+
+	useEffect(() => {
+		console.log("🔔 Frontend Debug: toolCalls changed:", toolCalls);
+	}, [toolCalls]);
+
 	// Use ref to track accumulated chunks to avoid race conditions
 	const accumulatedChunksRef = useRef<string>("");
 
@@ -85,10 +94,12 @@ export const useChatSessionWebSocketDebug = ({
 					break;
 
 				case "thinking_update":
+					console.log("🔔 Frontend Debug: Received thinking_update:", message.thinking);
 					setCurrentThinking(message.thinking);
 					break;
 
 				case "tool_call_update":
+					console.log("🔔 Frontend Debug: Received tool_call_update:", message);
 					const toolCall = {
 						name: message.tool_name,
 						status: message.status,
@@ -194,6 +205,11 @@ export const useChatSessionWebSocketDebug = ({
 						};
 						setAllBundles([productBundle]);
 
+						// Clear thinking after a delay so user can see the thinking messages
+						setTimeout(() => {
+							setCurrentThinking(null);
+						}, 2000); // 2 second delay
+
 						// Add a message to the chat about the products (matching original behavior)
 						const productMessage: Message = {
 							type: "bot",
@@ -212,6 +228,11 @@ export const useChatSessionWebSocketDebug = ({
 						setAllBundles(message.bundles);
 						setMessageType("product_bundle_recommendation");
 						setProductMessageTimestamp(Date.now());
+
+						// Clear thinking after a delay so user can see the thinking messages
+						setTimeout(() => {
+							setCurrentThinking(null);
+						}, 2000); // 2 second delay
 
 						// Auto-maximize the chat window (matching original behavior)
 						if (onMaximize && !isMaximized) {

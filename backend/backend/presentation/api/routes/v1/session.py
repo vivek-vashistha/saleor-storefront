@@ -351,6 +351,9 @@ async def process_message_with_websocket(
     process_chat_message_use_case: ProcessChatMessageUseCase,
     get_chat_session_use_case: GetChatSessionUseCase
 ) -> None:
+    import time
+    websocket_start_time = time.time()
+    logger.info(f"🌐 [WEBSOCKET] Starting WebSocket processing for session {session_id} at {websocket_start_time:.2f}s")
     """Process a chat message with WebSocket updates.
 
     Args:
@@ -418,11 +421,15 @@ async def process_message_with_websocket(
         logger.info(f"[WEBSOCKET] - Session ID: {response.id}")
         
         # Send each message as a chunk for real-time display
+        message_send_start_time = time.time()
+        logger.info(f"🌐 [WEBSOCKET] Starting message sending at {message_send_start_time:.2f}s")
+        
         for i, msg in enumerate(response.messages):
-            logger.info(f"[WEBSOCKET] Processing message {i} for WebSocket sending:")
-            logger.info(f"[WEBSOCKET] - Message type: {msg.get('type')}")
-            logger.info(f"[WEBSOCKET] - Message content length: {len(str(msg.get('content', '')))}")
-            logger.info(f"[WEBSOCKET] - Has recommended products: {bool(msg.get('recommended_products'))}")
+            message_start_time = time.time()
+            logger.info(f"🌐 [WEBSOCKET] Processing message {i} for WebSocket sending at {message_start_time:.2f}s:")
+            logger.info(f"🌐 [WEBSOCKET] - Message type: {msg.get('type')}")
+            logger.info(f"🌐 [WEBSOCKET] - Message content length: {len(str(msg.get('content', '')))}")
+            logger.info(f"🌐 [WEBSOCKET] - Has recommended products: {bool(msg.get('recommended_products'))}")
             
             if msg.get('type') == 'ai':
                 # Send message content in chunks for streaming effect
@@ -496,7 +503,9 @@ async def process_message_with_websocket(
             else:
                 logger.info(f"[WEBSOCKET] Skipping message of type: {msg.get('type')}")
         
-        logger.info(f"[WEBSOCKET] Message processing completed for session {session_id}")
+        websocket_end_time = time.time()
+        total_websocket_time = websocket_end_time - websocket_start_time
+        logger.info(f"🌐 [WEBSOCKET] Message processing completed for session {session_id} in {total_websocket_time:.2f}s")
         
     except Exception as e:
         logger.error(f"[WEBSOCKET] Error processing message for session {session_id}: {e}")

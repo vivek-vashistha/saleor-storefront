@@ -9,7 +9,6 @@ interface UseChatSessionProps {
 }
 
 export const useChatSession = ({ onMaximize, isMaximized }: UseChatSessionProps = {}) => {
-
 	// const { user } = useUser();
 	// const [conversationId, setConversationId] = useState<string | null>(null);
 	// const [messages, setMessages] = useState<Message[]>([{

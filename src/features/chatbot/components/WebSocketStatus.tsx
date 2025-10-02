@@ -26,6 +26,7 @@ export const WebSocketStatus: React.FC<WebSocketStatusProps> = ({
 	return (
 		<div className="flex items-center space-x-2">
 			{getStatusDot()}
+
 			{connectionError && onReconnect && (
 				<button onClick={onReconnect} className="text-xs text-blue-500 underline hover:text-blue-700">
 					Reconnect

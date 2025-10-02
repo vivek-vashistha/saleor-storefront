@@ -1,5 +1,6 @@
 import React from "react";
 import MessageBubble from "./MessageBubble";
+import ThinkingMessage from "./ThinkingMessage";
 import { cn } from "@/lib/utils";
 import { type Message } from "@/features/chatbot/types";
 
@@ -9,6 +10,9 @@ interface ChatMessagesProps {
 	isLoading: boolean;
 	messagesEndRef: React.RefObject<HTMLDivElement>;
 	className?: string;
+	// Thinking message props
+	currentThinking?: string | null;
+	toolCalls?: Array<{ name: string; status: string; data?: any }>;
 }
 
 const ChatMessages: React.FC<ChatMessagesProps> = ({
@@ -17,6 +21,8 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
 	isLoading,
 	messagesEndRef,
 	className,
+	currentThinking,
+	toolCalls = [],
 }) => {
 	return (
 		<div
@@ -36,8 +42,11 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
 					/>
 				))}
 
-				{/* Loading indicator */}
-				{isLoading && (
+				{/* Thinking Message */}
+				{currentThinking && <ThinkingMessage thinking={currentThinking} toolCalls={toolCalls} />}
+
+				{/* Loading indicator - only show if no thinking message */}
+				{isLoading && !currentThinking && (
 					<div className="mb-2 flex justify-start">
 						<div className="flex items-center rounded-[20px_20px_20px_0] p-3">
 							<div className="typing-indicator" aria-label="Assistant is typing">

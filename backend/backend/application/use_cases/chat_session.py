@@ -177,7 +177,25 @@ class ProcessChatMessageUseCase:
         logger.info(f"[PROCESS_CHAT] Using workflow: {workflow_name}")
         
         # Process the message with the selected workflow
-        session.state = await workflow.run(session.state)
+        logger.info(f"[PROCESS_CHAT] Checking workflow {workflow_name} for session_id support")
+        logger.info(f"[PROCESS_CHAT] Workflow has 'run' method: {hasattr(workflow, 'run')}")
+        if hasattr(workflow, 'run'):
+            logger.info(f"[PROCESS_CHAT] Workflow run method signature: {workflow.run.__code__.co_varnames}")
+            logger.info(f"[PROCESS_CHAT] Session ID: {session.id}")
+        
+        # Try to pass session_id to workflow - if it fails, fall back to no session_id
+        try:
+            logger.info(f"[PROCESS_CHAT] Attempting to pass session_id to workflow: {session.id}")
+            session.state = await workflow.run(session.state, session_id=session.id)
+            logger.info(f"[PROCESS_CHAT] Successfully passed session_id to workflow")
+        except TypeError as e:
+            # Workflow doesn't support session_id parameter
+            logger.info(f"[PROCESS_CHAT] Workflow doesn't support session_id, using fallback: {e}")
+            session.state = await workflow.run(session.state)
+        except Exception as e:
+            # Other error - still try without session_id
+            logger.warning(f"[PROCESS_CHAT] Error passing session_id, using fallback: {e}")
+            session.state = await workflow.run(session.state)
         logger.info(f"[PROCESS_CHAT] Workflow {workflow_name} completed")
         
         # Log the state after workflow processing

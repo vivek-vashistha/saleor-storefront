@@ -19,11 +19,11 @@ export const generateStaticParams = async () => {
 				?.filter((channel) => channel.isActive)
 				.map((channel) => ({ channel: channel.slug })) ?? []
 		);
-    } else {
+	} else {
 		// default switched to channel-ind
 		// return [{ channel: "default-channel" }];
-        return [{ channel: "channel-ind" }];
-    }
+		return [{ channel: "channel-ind" }];
+	}
 };
 
 export default function ChannelLayout({ children }: { children: ReactNode }) {

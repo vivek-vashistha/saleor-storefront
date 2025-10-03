@@ -22,6 +22,10 @@ START_ROW = int(os.getenv("START_ROW", "1"))  # Start from this row (1-based, in
 TOTAL_RECORDS = int(os.getenv("TOTAL_RECORDS", "0"))  # Total records to process (0 = all records)
 SKIP_HEADER = os.getenv("SKIP_HEADER", "true").lower() == "true"  # Whether to skip header row
 
+# Results output configuration
+# OUTPUT_RESULTS_CSV = os.getenv("OUTPUT_RESULTS_CSV", "../../data/gear/saleor_import_results.csv")
+OUTPUT_RESULTS_CSV = os.getenv("OUTPUT_RESULTS_CSV", "../../data/iherb_data_for_neo4j/iherb_product_data - for_Neo4j_push_v3_with_saleor_ID.csv")
+
 # ========= CACHING SYSTEM =========
 CACHE_DIR = "cache"
 CACHE_FILES = {
@@ -360,6 +364,18 @@ mutation ($name: String!, $slug: String!) {
 }
 """
 
+M_CATEGORY_CREATE_WITH_PARENT = """
+mutation ($name: String!, $slug: String!, $parent: ID) {
+  categoryCreate(
+    input: { name: $name, slug: $slug }
+    parent: $parent
+  ) {
+    category { id name slug parent { id } }
+    errors { field code message }
+  }
+}
+"""
+
 # Product Types
 Q_PRODUCT_TYPE_BY_SLUG = """
 query ($slug: String!) {
@@ -645,6 +661,79 @@ def get_or_create_category(slug: str, name: Optional[str] = None) -> str:
     set_cached_id("categories", slug, category_id)
     print(f"Created and cached category: {slug} -> {category_id}")
     return category_id
+
+def get_or_create_category_with_parent(slug: str, name: Optional[str], parent_id: Optional[str]) -> str:
+    """Get or create a category, optionally as a child of parent_id."""
+    # First try cache/simple lookup by slug
+    try:
+        res = gql(Q_CATEGORY_BY_SLUG, {"slug": slug})
+        if res.get("category"):
+            return res["category"]["id"]
+    except Exception:
+        pass
+
+    # Create with optional parent via inline input
+    vars_payload = {
+        "name": (name or slug.replace("-", " ").title()),
+        "slug": slug,
+        "parent": parent_id,
+    }
+    create = gql(M_CATEGORY_CREATE_WITH_PARENT, vars_payload)
+    errs = create.get("categoryCreate", {}).get("errors")
+    if errs:
+        raise RuntimeError(f"categoryCreate error: {errs}")
+    return create["categoryCreate"]["category"]["id"]
+
+def get_or_create_category_hierarchy(
+    main_slug: Optional[str],
+    main_name: Optional[str],
+    sub_slug: Optional[str],
+    sub_name: Optional[str],
+    leaf_slug: Optional[str],
+    leaf_name: Optional[str],
+) -> Tuple[str, str]:
+    """Ensure category hierarchy exists and return (leaf_category_id, leaf_category_slug).
+
+    Rules:
+    - Create main (root). If sub provided, create under main. If leaf provided, create under deepest existing (sub if provided else main).
+    - If only leaf provided (no main/sub), create as root.
+    - If only main provided, and leaf provided, create leaf under main.
+    """
+    created_main_id = None
+    created_sub_id = None
+
+    # Create/resolve main
+    if main_slug:
+        try:
+            created_main_id = get_or_create_category_with_parent(main_slug, main_name, None)
+        except Exception as e:
+            print(f"Warning: failed to create/find main category '{main_slug}': {e}")
+
+    # Create/resolve sub (child of main)
+    if sub_slug:
+        parent_for_sub = created_main_id
+        try:
+            created_sub_id = get_or_create_category_with_parent(sub_slug, sub_name, parent_for_sub)
+        except Exception as e:
+            print(f"Warning: failed to create/find sub category '{sub_slug}': {e}")
+
+    # Determine leaf target parent
+    leaf_parent_id = created_sub_id or created_main_id
+
+    # If no explicit leaf slug provided, leaf is the deepest existing category
+    if not leaf_slug:
+        if created_sub_id and sub_slug:
+            return created_sub_id, sub_slug
+        if created_main_id and main_slug:
+            return created_main_id, main_slug
+        # No categories available; fallback to 'uncategorized'
+        fallback_slug = "uncategorized"
+        leaf_id = get_or_create_category_with_parent(fallback_slug, "Uncategorized", None)
+        return leaf_id, fallback_slug
+
+    # Create/resolve leaf under leaf_parent (which may be None -> root)
+    leaf_id = get_or_create_category_with_parent(leaf_slug, leaf_name, leaf_parent_id)
+    return leaf_id, leaf_slug
 
 def get_or_create_attribute(slug: str, name: Optional[str] = None, input_type: str = "DROPDOWN") -> str:
     # Check cache first
@@ -1268,6 +1357,7 @@ def bulk_create_from_csv(csv_path: str):
     # Read all rows first to calculate total and handle start row
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
+        input_headers = reader.fieldnames or []
         all_rows = list(reader)
     
     total_rows = len(all_rows)
@@ -1310,85 +1400,134 @@ def bulk_create_from_csv(csv_path: str):
     
     print(f"\n🚀 Starting processing of {actual_count} records...")
     print("=" * 60)
-    
-    for i, row in enumerate(rows_to_process, 1):
+
+    # Prepare results CSV writer (create with header if new; overwrite if header mismatches)
+    try:
+        os.makedirs(os.path.dirname(OUTPUT_RESULTS_CSV), exist_ok=True)
+    except Exception:
+        pass
+    results_file_exists = os.path.exists(OUTPUT_RESULTS_CSV) and os.path.getsize(OUTPUT_RESULTS_CSV) > 0
+    desired_headers = list(input_headers) + ["saleor_product_id", "saleor_variant_id"]
+
+    open_mode = "a"
+    need_write_header = not results_file_exists
+    if results_file_exists:
         try:
-            name = row["name"].strip()
-            slug = slugify(row["slug"] or name)
-            desc = row.get("description_text", "").strip()
-            # category_slug = slugify(row["category_slug"])
+            with open(OUTPUT_RESULTS_CSV, mode="r", newline="", encoding="utf-8") as existing_f:
+                existing_reader = csv.reader(existing_f)
+                existing_header = next(existing_reader, [])
+            if existing_header != desired_headers:
+                print("Output results header differs from desired schema. Overwriting results file with new header.")
+                open_mode = "w"
+                need_write_header = True
+        except Exception:
+            open_mode = "w"
+            need_write_header = True
 
-            category_slug = row.get("category") or row.get("Category")
-            category_slug = slugify(category_slug) if category_slug else None
+    with open(OUTPUT_RESULTS_CSV, mode=open_mode, newline="", encoding="utf-8") as out_f:
+        writer = csv.DictWriter(out_f, fieldnames=desired_headers, extrasaction="ignore")
+        if need_write_header:
+            writer.writeheader()
+        
+        for i, row in enumerate(rows_to_process, 1):
+            try:
+                name = row["name"].strip()
+                slug = slugify(row["slug"] or name)
+                desc = row.get("description_text", "").strip()
+                # Category hierarchy support for iHerb CSV
+                main_cat = row.get("main_category") or row.get("Main Category")
+                main_slug = row.get("main_category_slug") or row.get("Main Category Slug")
+                sub_cat = row.get("sub_category") or row.get("Sub Category")
+                sub_slug = row.get("sub_category_slug") or row.get("Sub Category Slug")
+                leaf_cat = row.get("category_name") or row.get("Category Name")
+                leaf_slug = row.get("category_slug") or row.get("Category Slug")
 
-            # Fallback if missing
-            if not category_slug:
-                # derive from product type, or use a default bucket
-                category_slug = slugify(row.get("product_type") or row.get("Product Type") or "uncategorized")
+                # Normalize slugs
+                main_slug = slugify(main_slug) if main_slug else (slugify(main_cat) if main_cat else None)
+                sub_slug = slugify(sub_slug) if sub_slug else (slugify(sub_cat) if sub_cat else None)
+                leaf_slug = slugify(leaf_slug) if leaf_slug else (slugify(leaf_cat) if leaf_cat else None)
 
-            collections = split_collections(row.get("collections", ""))
-            product_type_slug = slugify(row["product_type_slug"])
-            attributes_map = parse_attributes(row.get("attributes", ""))
-            rating = row.get("rating") or None
-            tax_class = row.get("tax_class") or None
-            weight = float(row["weight"]) if row.get("weight") else None
-            # price = float(row["price"]) if row.get("price") else None
-            price = parse_decimal(row.get("price") or row.get("Price"))
+                # Build hierarchy and get final category id/slug
+                leaf_category_id, category_slug = get_or_create_category_hierarchy(
+                    main_slug=main_slug,
+                    main_name=main_cat,
+                    sub_slug=sub_slug,
+                    sub_name=sub_cat,
+                    leaf_slug=leaf_slug,
+                    leaf_name=leaf_cat,
+                )
 
-            image_url = row.get("image_url", "").strip()
+                collections = split_collections(row.get("collections", ""))
+                product_type_slug = slugify(row["product_type_slug"])
+                attributes_map = parse_attributes(row.get("attributes", ""))
+                rating = row.get("rating") or None
+                tax_class = row.get("tax_class") or None
+                weight = float(row["weight"]) if row.get("weight") else None
+                # price = float(row["price"]) if row.get("price") else None
+                price = parse_decimal(row.get("price") or row.get("Price"))
 
-            print(f"\n[{i}/{actual_count}] Processing product: {name}")
-            print(f"   Product type slug: {product_type_slug}")
+                image_url = row.get("image_url", "").strip()
 
-            # 1) Create product
-            pid, pslug = create_product(
-                name=name,
-                slug=slug,
-                description_text=desc,
-                category_slug=category_slug,
-                collections_slugs=collections,
-                product_type_slug=product_type_slug,
-                attributes_map=attributes_map,
-                rating=rating,
-                tax_class=tax_class,
-                weight=weight,
-                skip_attributes=False,  # Set to True to skip attributes completely
-            )
-            print(f"   ✅ Created product: {name} -> {pid}")
+                print(f"\n[{i}/{actual_count}] Processing product: {name}")
+                print(f"   Product type slug: {product_type_slug}")
 
-            # 2) Add default variant (for pricing/purchasing)
-            vid = create_default_variant(pid, slug, weight)
-            print(f"   ✅ Variant created: {vid}")
+                # 1) Create product
+                pid, pslug = create_product(
+                    name=name,
+                    slug=slug,
+                    description_text=desc,
+                    category_slug=category_slug,
+                    collections_slugs=collections,
+                    product_type_slug=product_type_slug,
+                    attributes_map=attributes_map,
+                    rating=rating,
+                    tax_class=tax_class,
+                    weight=weight,
+                    skip_attributes=True,  # Skip attributes to bypass assignment errors
+                )
+                print(f"   ✅ Created product: {name} -> {pid}")
 
-            # 3) Assign product to channel (required before pricing)
-            set_product_channel_availability(pid, channel_id, is_published=True, is_available_for_purchase=True)
-            print(f"   ✅ Product assigned to channel '{CHANNEL_SLUG}'")
+                # 2) Add default variant (for pricing/purchasing)
+                vid = create_default_variant(pid, slug, weight)
+                print(f"   ✅ Variant created: {vid}")
 
-            # 4) Price it in channel (if price present)
-            if price is not None:
-                set_variant_price(pid, vid, channel_id, currency, price)
-                print(f"   ✅ Priced {price} {currency} in channel '{CHANNEL_SLUG}'")
-            
-            # 4.1) Always enforce stock in Default Warehouse = 100
-            set_default_warehouse_stock(vid, 100, "Default Warehouse")
-            print("   ✅ Stock set: Default Warehouse = 100")
+                # 3) Assign product to channel (required before pricing)
+                set_product_channel_availability(pid, channel_id, is_published=True, is_available_for_purchase=True)
+                print(f"   ✅ Product assigned to channel '{CHANNEL_SLUG}'")
 
-            # 5) Attach image if available
-            if image_url:
-                add_product_media(pid, image_url, alt=name)
-                print("   ✅ Image attached")
+                # 4) Price it in channel (if price present)
+                if price is not None:
+                    set_variant_price(pid, vid, channel_id, currency, price)
+                    print(f"   ✅ Priced {price} {currency} in channel '{CHANNEL_SLUG}'")
+                
+                # 4.1) Always enforce stock in Default Warehouse = 100
+                set_default_warehouse_stock(vid, 100, "Default Warehouse")
+                print("   ✅ Stock set: Default Warehouse = 100")
 
-            created.append((pid, pslug, vid))
-            
-        except Exception as e:
-            print(f"   ❌ Error processing product '{name}': {e}")
-            print("   Continuing with next product...")
-            continue
+                # 5) Attach image if available
+                if image_url:
+                    add_product_media(pid, image_url, alt=name)
+                    print("   ✅ Image attached")
+
+                # 6) Write results row immediately (mirror input row + IDs)
+                output_row = dict(row)
+                output_row["saleor_product_id"] = pid
+                output_row["saleor_variant_id"] = vid
+                writer.writerow(output_row)
+                out_f.flush()
+
+                created.append((pid, pslug, vid))
+                
+            except Exception as e:
+                print(f"   ❌ Error processing product '{name}': {e}")
+                print("   Continuing with next product...")
+                continue
     
     print(f"\n" + "=" * 60)
     print(f"🎉 Processing complete!")
     print(f"   Successfully processed: {len(created)}/{actual_count} products")
     print(f"   Failed: {actual_count - len(created)} products")
+    print(f"   Results saved to: {OUTPUT_RESULTS_CSV}")
                 
     return created
 
@@ -1425,7 +1564,10 @@ if __name__ == "__main__":
     # Validate attribute cache
     validate_attribute_cache()
     
-    csv_file = "../../data/saleor_products_ready_enriched.csv"  # adjust path if needed
+    # csv_file = "../../data/gear/saleor_products_ready_enriched.csv"  # adjust path if needed
+    # csv_file = "../../data/gear/gear_saleor_products_ready_enriched - modifide-just_4_data.csv"  # adjust path if needed
+    csv_file = "../../data/iherb/iherb_product_data - for_saleor_push_v3.csv"  # adjust path if needed
+    # csv_file = "../../data/iherb/iherb_product_data - Copy of for_saleor_push_v3.csv"  # adjust path if needed
     results = bulk_create_from_csv(csv_file)
     
     print(f"\n🎉 Done. Created {len(results)} product(s) with variants, pricing, and images.")

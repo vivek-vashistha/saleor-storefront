@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict
 from dataclasses import dataclass
 from dotenv import load_dotenv
 load_dotenv()
@@ -21,6 +21,7 @@ from langchain_community.utilities.graphql import GraphQLAPIWrapper
 from langchain_community.tools.graphql.tool import BaseGraphQLTool
 
 import logging
+import requests
 
 class LengthFilter(logging.Filter):
     def __init__(self, max_length):
@@ -554,6 +555,81 @@ def run_structured(
                 if pid not in tool_text:
                     logger.warning(f"⚠️ Missing product ID {pid} in bulk query")
     return result
+
+
+# ---------------------------------
+# Structured product fetch (deterministic GraphQL)
+# ---------------------------------
+def fetch_products_structured(ids: List[str]) -> List[Dict[str, Any]]:
+    """
+    Fetch product details directly via GraphQL for a list of product IDs and
+    return a structured list suitable for deterministic consumption.
+
+    Each item includes: id, name, channel (from CHANNEL_SLUG), price {amount, currency},
+    isAvailableForPurchase, isPublished.
+    """
+    try:
+        query = build_bulk_product_query(ids)
+        headers = {"Authorization": f"Bearer {SALEOR_TOKEN}"} if SALEOR_TOKEN and SALEOR_TOKEN != "REPLACE_WITH_YOUR_API_TOKEN" else {}
+        resp = requests.post(
+            SALEOR_ENDPOINT,
+            json={
+                "query": query,
+                "variables": {"ids": ids},
+            },
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        data = (payload or {}).get("data") or {}
+        products = (((data.get("products") or {}).get("edges") or []))
+
+        results: List[Dict[str, Any]] = []
+        for edge in products:
+            node = (edge or {}).get("node") or {}
+            pid = node.get("id")
+            name = node.get("name")
+            listings = node.get("channelListings") or []
+
+            price_amount = None
+            price_currency = None
+            is_available = None
+            is_published = None
+            chosen_channel = None
+
+            for listing in listings:
+                channel = (listing or {}).get("channel") or {}
+                if channel.get("slug") == CHANNEL_SLUG:
+                    chosen_channel = channel.get("slug")
+                    pricing = (listing or {}).get("pricing") or {}
+                    price_range = pricing.get("priceRange") or {}
+                    start = price_range.get("start") or {}
+                    gross = (start.get("gross") or {})
+                    price_amount = gross.get("amount")
+                    price_currency = gross.get("currency")
+                    is_available = listing.get("isAvailableForPurchase")
+                    is_published = listing.get("isPublished")
+                    break
+
+            if pid:
+                results.append({
+                    "id": pid,
+                    "name": name,
+                    "channel": chosen_channel or CHANNEL_SLUG,
+                    "price": {"amount": price_amount, "currency": price_currency},
+                    "isAvailableForPurchase": is_available,
+                    "isPublished": is_published,
+                })
+
+        logger.info(f"SALEOR_TOOL | structured_products_fetched | count={len(results)}")
+        return results
+    except Exception as e:
+        try:
+            logger.exception(f"SALEOR_TOOL | structured_products_error: {e}")
+        except Exception:
+            pass
+        return []
 
 
 # ---------------------------------

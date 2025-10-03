@@ -1,6 +1,6 @@
 {
-  "default-channel": {
-    "id": "Q2hhbm5lbDox",
-    "currency_code": "USD"
-  }
+	"channel-ind": {
+		"id": "Q2hhbm5lbDoz",
+		"currency_code": "INR"
+	}
 }

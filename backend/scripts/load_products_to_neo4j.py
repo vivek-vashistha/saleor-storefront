@@ -9,6 +9,7 @@ from backend.domain.entities import Product
 from backend.infrastructure.connections import Neo4jConfig, Neo4jConnection
 from backend.infrastructure.repositories import IProductRepository, Neo4jProductRepository
 from backend.settings import AISettings, Neo4jSettings
+from langchain_openai import OpenAIEmbeddings
 
 # Configure logging
 logging.basicConfig(
@@ -18,10 +19,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("load_products_neo4j")
 
+def split_list(s: str) -> list[str]:
+    if not s:
+        return []
+    seps = ["|", ",", ";"]
+    parts = [s]
+    for sep in seps:
+        parts = [p for chunk in parts for p in chunk.split(sep)]
+    # strip, dedupe, drop empties
+    cleaned = []
+    for p in (x.strip() for x in parts):
+        if p and p not in cleaned:
+            cleaned.append(p)
+    return cleaned
 
-def normalize_string_to_list(string: str) -> list[str]:
-    """Convert a string to a list of strings."""
-    return [item.strip().lower() for item in string.strip().lower().split() if item.strip()]
+# def normalize_string_to_list(string: str) -> list[str]:
+#     """Convert a string to a list of strings."""
+#     return [item.strip().lower() for item in string.strip().lower().split() if item.strip()]
 
 
 def get_repository() -> IProductRepository:
@@ -52,48 +66,121 @@ def get_repository() -> IProductRepository:
     return Neo4jProductRepository(connection)
 
 
+# def load_products_from_csv(csv_path: Path) -> list[Product]:
+#     """Load products from a CSV file.
+
+#     Args:
+#         csv_path: Path to the CSV file
+
+#     Returns:
+#         List of Product objects
+#     """
+#     products = []
+
+#     with open(csv_path, encoding="latin1") as file:
+#         reader = csv.DictReader(file)
+#         for row in reader:
+#             try:
+#                 # Parse embedding if it exists
+#                 embedding = None
+#                 if "embedding" in row and row["embedding"]:
+#                     try:
+#                         embedding = json.loads(row["embedding"])
+#                     except json.JSONDecodeError:
+#                         logger.warning(f"Failed to parse embedding for product {row['id']}")
+                
+#                 product = Product(
+#                     product_id=int(row["id"]),
+#                     name=row["name"].strip(),
+#                     price=float(row["price"].replace(",", "")),
+#                     category=row["category"].strip().lower(),
+#                     description=row["description"].strip(),
+#                     review_score=float(row["review_score"]),
+#                     best_for=normalize_string_to_list(row["best_for"]),
+#                     image_url=row["image_url"].strip(),
+#                     breadcrumbs=normalize_string_to_list(row["breadcrumbs"]),
+#                     embedding=embedding,
+#                 )
+#                 products.append(product)
+#             except (ValueError, KeyError) as e:
+#                 logger.warning(f"Skipping row due to error: {e}")
+#                 continue
+
+#     return products
+
 def load_products_from_csv(csv_path: Path) -> list[Product]:
-    """Load products from a CSV file.
-
-    Args:
-        csv_path: Path to the CSV file
-
-    Returns:
-        List of Product objects
-    """
-    products = []
-
-    with open(csv_path, encoding="latin1") as file:
-        reader = csv.DictReader(file)
+    products: list[Product] = []
+    with open(csv_path, encoding="utf-8") as f:
+        reader = csv.DictReader(f)
         for row in reader:
             try:
-                # Parse embedding if it exists
                 embedding = None
-                if "embedding" in row and row["embedding"]:
+                if row.get("embedding"):
                     try:
                         embedding = json.loads(row["embedding"])
                     except json.JSONDecodeError:
-                        logger.warning(f"Failed to parse embedding for product {row['id']}")
-                
-                product = Product(
-                    product_id=int(row["id"]),
-                    name=row["name"].strip(),
-                    price=float(row["price"].replace(",", "")),
-                    category=row["category"].strip().lower(),
-                    description=row["description"].strip(),
-                    review_score=float(row["review_score"]),
-                    best_for=normalize_string_to_list(row["best_for"]),
-                    image_url=row["image_url"].strip(),
-                    breadcrumbs=normalize_string_to_list(row["breadcrumbs"]),
-                    embedding=embedding,
+                        logger.warning(f"Failed to parse embedding for row with product {row.get('saleor_product_id')}")
+
+                products.append(
+                    Product(
+                        # IDs
+                        product_id=str(row["saleor_product_id"]).strip(),
+                        variant_id=str(row["saleor_variant_id"]).strip(),
+                        # product core
+                        name=row.get("name", "").strip(),
+                        brand=row.get("brand", "") or None,
+                        url=row.get("url", "") or None,
+                        slug=row.get("slug", "") or None,
+                        image_url=row.get("image_url", "") or None,
+                        # categories (3 levels)
+                        main_category=row.get("main_category") or None,
+                        main_category_slug=row.get("main_category_slug") or None,
+                        sub_category=row.get("sub_category") or None,
+                        sub_category_slug=row.get("sub_category_slug") or None,
+                        category_name=row.get("category_name") or None,
+                        category_slug=row.get("category_slug") or None,
+                        # attrs
+                        review_score=float(row["review_score"]) if row.get("review_score") else None,
+                        review_count=int(row["review_count"]) if row.get("review_count") else None,
+                        product_type_name=row.get("product_type_name") or None,
+                        product_type_slug=row.get("product_type_slug") or None,
+                        tax_class=row.get("tax_class") or None,
+                        collections=row.get("collections") or None,
+                        breadcrumbs=split_list(row.get("breadcrumbs", "")),
+                        short_description=row.get("short_description") or None,
+                        description_text=row.get("description_text") or None,
+                        best_for=[b.lower() for b in split_list(row.get("best_for", ""))],
+                        embedding=embedding,
+                    )
                 )
-                products.append(product)
-            except (ValueError, KeyError) as e:
+            except Exception as e:
                 logger.warning(f"Skipping row due to error: {e}")
                 continue
-
+    # from pprint import pprint
+    # pprint(products)
     return products
 
+
+def _build_embedding_text(p: Product) -> str:
+    """Compose a semantically rich text for embedding from product fields."""
+    parts: list[str] = []
+    if p.name:
+        parts.append(p.name)
+    if p.brand:
+        parts.append(f"Brand: {p.brand}")
+    categories: list[str] = []
+    for c in [p.main_category, p.sub_category, p.category_name, p.category_slug]:
+        if c:
+            categories.append(str(c))
+    if categories:
+        parts.append("Categories: " + " | ".join(categories))
+    if p.best_for:
+        parts.append("Best for: " + ", ".join([str(x) for x in p.best_for if x]))
+    if p.description_text:
+        parts.append(p.description_text)
+    if p.breadcrumbs:
+        parts.append("Breadcrumbs: " + " > ".join([str(x) for x in p.breadcrumbs if x]))
+    return "\n".join(parts)
 
 async def setup_db():
     """Load products into a Neo4j product repository with enhanced graph relationships."""
@@ -104,7 +191,13 @@ async def setup_db():
     logger.info("Deleted all products and related nodes from the Neo4j repository")
 
     # Get configuration from environment variables or use defaults
-    products_csv = Path(__file__).parent.parent.joinpath("data/rei_products.csv")
+    # products_csv = Path(__file__).parent.parent.joinpath("data/rei_products.csv")
+
+    # 👉 point to your iHerb CSV
+    products_csv = Path(__file__).parent.parent.joinpath(
+        # "data/iherb_product_data - for_Neo4j_push_v3_with_saleor_ID.csv"
+        "data/iherb_data_for_neo4j/iherb_product_data - for_Neo4j_push_v3_with_saleor_ID.csv"
+    )
 
     logger.info(f"Products CSV: {products_csv}")
 
@@ -118,6 +211,27 @@ async def setup_db():
     products = load_products_from_csv(products_csv)
     logger.info(f"Loaded {len(products)} products")
 
+    # Generate embeddings for products that don't have one
+    missing = [(i, p) for i, p in enumerate(products) if not p.embedding]
+    if missing:
+        ai_settings = AISettings()
+        configured_model = getattr(ai_settings.EMBEDDING_MODEL_NAME, "value", str(ai_settings.EMBEDDING_MODEL_NAME))
+        model_name = configured_model or "text-embedding-3-small"
+        if model_name != "text-embedding-3-small":
+            logger.warning(
+                "Embedding model '%s' may not be 1536-d. Overriding to 'text-embedding-3-small' to match Neo4j index.",
+                model_name,
+            )
+            model_name = "text-embedding-3-small"
+
+        logger.info("Generating embeddings for %d products using model '%s'", len(missing), model_name)
+        embedder = OpenAIEmbeddings(model=model_name, api_key=ai_settings.OPENAI_API_KEY)
+        texts = [_build_embedding_text(p) for _, p in missing]
+        vectors = embedder.embed_documents(texts)
+        for (idx, _), vec in zip(missing, vectors):
+            products[idx].embedding = vec
+        logger.info("Embeddings generated for %d products", len(missing))
+
     # Initialize the repository with the products (now with enhanced batch processing and graph relationships)
     logger.info("Initializing Neo4j repository with enhanced graph relationships...")
     logger.info("This will create:")
@@ -129,7 +243,7 @@ async def setup_db():
     logger.info("  - RECOMMENDED_WITH relationships for cross-category recommendations")
     
     await repository.insert_products(products)
-    logger.info(f"✅ Successfully initialized Neo4j repository with {len(products)} products")
+    logger.info(f"✅ Successfully initialized Neo4j repository with {len(products)} products/variants with 3-level categories and attributes")
     logger.info("🎉 Enhanced graph relationships created! You can now use:")
     logger.info("  - Graph-aware search with relationship scoring")
     logger.info("  - Related products discovery")

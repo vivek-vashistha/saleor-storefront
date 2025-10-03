@@ -89,9 +89,12 @@ class ProductService:
             
             logger.info(f"After deduplication: {len(unique_products)} unique products")
             
-            # Log detailed product information
+            # Log detailed product information (align with current Product schema)
             for i, product in enumerate(unique_products):
-                logger.info(f"Product {i+1}: ID={product.product_id}, Name='{product.name}', Category='{product.category}', Price=${product.price}")
+                category_label = getattr(product, "category_name", None) or getattr(product, "category_slug", None) or ""
+                logger.info(
+                    f"Product {i+1}: ID={product.product_id}, Name='{product.name}', Category='{category_label}'"
+                )
             
             # Enrich products with Saleor data if service is available
             if self.saleor_service and unique_products:
@@ -130,16 +133,17 @@ class ProductService:
                 all_products.extend(products)
                 logger.info(f"Added {len(products)} products from query {i+1}")
 
-            # Group products by category and remove duplicates
+            # Group products by category label (fallback to slug or default) and remove duplicates
             products_by_category = defaultdict(list)
             seen_product_ids = set()
             
             for product in all_products:
                 # Only add product if we haven't seen it before
                 if product.product_id not in seen_product_ids:
-                    products_by_category[product.category].append(product)
+                    category_label = getattr(product, "category_name", None) or getattr(product, "category_slug", None) or "uncategorized"
+                    products_by_category[category_label].append(product)
                     seen_product_ids.add(product.product_id)
-                    logger.info(f"Grouped product '{product.name}' into category '{product.category}'")
+                    logger.info(f"Grouped product '{product.name}' into category '{category_label}'")
                 else:
                     logger.info(f"Skipped duplicate product '{product.name}' (ID: {product.product_id})")
 

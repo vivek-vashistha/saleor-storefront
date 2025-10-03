@@ -70,7 +70,9 @@ export const ProductCard = ({
 
         <div className="flex items-center justify-between mt-auto pt-2">
           <div className="text-lg font-bold text-foreground">
-            ${product.price?.toFixed(2) || "0.00"}
+            {/* Use INR symbol for channel-ind by default */}
+            {/* ${product.price?.toFixed(2) || "0.00"} */}
+            ₹{product.price?.toFixed(2) || "0.00"}
           </div>
           <div className="flex items-center">
             <div className="flex items-center mr-3">

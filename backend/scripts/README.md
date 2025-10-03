@@ -6,59 +6,107 @@ This directory contains utility scripts for managing and testing the conversatio
 
 ### Configuration Testing
 
-#### `test_config.py`
+- **`test_config.py`**
 
-Tests that Neo4j configuration is properly reading from environment variables.
+  Tests that Neo4j configuration is properly reading from environment variables.
 
-```bash
-python scripts/test_config.py
-```
+  ```bash
+  python scripts/test_config.py
+  ```
 
 ### Product Repository Testing
 
-#### `test_neo4j_repository.py`
+- **`test_neo4j_repository.py`**
 
-Tests the Neo4jProductRepository implementation with sample data.
+  Tests the Neo4jProductRepository implementation with sample data.
 
-```bash
-python scripts/test_neo4j_repository.py
-```
+  ```bash
+  python scripts/test_neo4j_repository.py
+  ```
 
 ### Data Loading Scripts
 
-#### `load_products_to_qdrant.py`
+- **`load_products_to_qdrant.py`**
 
-Loads products from CSV into Qdrant vector database.
+  Loads products from CSV into Qdrant vector database.
 
-```bash
-python scripts/load_products_to_qdrant.py
-```
+  ```bash
+  python scripts/load_products_to_qdrant.py
+  ```
 
-#### `load_products_to_neo4j.py`
+- **`load_products_to_neo4j.py`**
 
-Loads products from CSV into Neo4j knowledge graph.
+  Loads products from CSV into Neo4j knowledge graph with enhanced graph relationships.
 
-```bash
-python scripts/load_products_to_neo4j.py
-```
+- **Data Mapping Structure:**
 
-#### `load_products_comparison.py`
+  ```bash
+     # Product node (from CSV columns only)
+     Product.productId     → saleor_product_id
+     Product.name          → name
+     Product.brand         → brand
+     Product.canonicalUrl  → url
+     Product.slug          → slug
+     Product.image         → image_url
 
-Loads products into both Qdrant and Neo4j for comparison testing.
+     # Variant node (from CSV columns only)
+     Variant.variantId     → saleor_variant_id
 
-```bash
-# Load products into both databases
-python scripts/load_products_comparison.py --setup both
+     # Category hierarchy (exactly 3 levels from your CSV)
+     MainCategory.code     → main_category_slug
+     MainCategory.name     → main_category
 
-# Run comparison tests
-python scripts/load_products_comparison.py --setup both --compare
+     SubCategory.code      → sub_category_slug
+     SubCategory.name      → sub_category
 
-# Test specific query
-python scripts/load_products_comparison.py --setup both --query "hiking boots"
+     Category.code         → category_slug
+     Category.name         → category_name
 
-# Test with category filter
-python scripts/load_products_comparison.py --setup both --query "waterproof" --categories clothing
-```
+     # Attribute keys/values (attach to Variant; all come from CSV)
+     AttrValue(key="best_for").value_str            ← best_for
+     AttrValue(key="review_score").value_num        ← review_score
+     AttrValue(key="review_count").value_num        ← review_count
+     AttrValue(key="product_type_name").value_str   ← product_type_name
+     AttrValue(key="product_type_slug").value_str   ← product_type_slug
+     AttrValue(key="tax_class").value_str           ← tax_class
+     AttrValue(key="collections").value_str         ← collections
+     AttrValue(key="breadcrumbs").value_str         ← breadcrumbs
+     AttrValue(key="short_description").value_str   ← short_description
+     AttrValue(key="description_text").value_str    ← description_text
+
+     # Core relationships (only using data present in CSV)
+     (Product)-[:HAS_VARIANT]->(Variant)                          # link by saleor_product_id ↔ saleor_variant_id
+     (Product)-[:IN_CATEGORY]->(Category)                         # leaf category from category_*
+     (Category)-[:CHILD_OF]->(SubCategory)
+     (SubCategory)-[:CHILD_OF]->(MainCategory)
+     (Variant)-[:HAS_ATTR]->(AttrValue)
+     (AttrValue)-[:OF]->(Attribute {key:<same as above>})         # one Attribute node per distinct key
+  ```
+
+- #### Usage:
+
+  ```bash
+     cd backend
+     uv run python -m scripts.load_products_to_neo4j
+  ```
+
+- `load_products_comparison.py`
+
+  Loads products into both Qdrant and Neo4j for comparison testing.
+
+  ```bash
+  # Load products into both databases
+  python scripts/load_products_comparison.py --setup both
+
+  # Run comparison tests
+  python scripts/load_products_comparison.py --setup both --compare
+
+  # Test specific query
+  python scripts/load_products_comparison.py --setup both --query "hiking boots"
+
+  # Test with category filter
+  python scripts/load_products_comparison.py --setup both --query "waterproof" --categories clothing
+  ```
 
 ## Usage Examples
 
@@ -73,14 +121,7 @@ python scripts/test_config.py
 
 ### 2. Load Products to Neo4j
 
-Load products into the Neo4j knowledge graph:
-
-```bash
-cd backend
-python scripts/load_products_to_neo4j.py
-```
-
-OR
+Load products into the Neo4j knowledge graph with enhanced graph relationships:
 
 ```bash
 cd backend
@@ -137,7 +178,7 @@ OPENAI_API_KEY=your-openai-api-key
 
 Ensure you have the product data file:
 
-- `data/rei_products.csv` - Product data in CSV format
+- `data/iherb_data_for_neo4j/iherb_product_data - for_Neo4j_push_v3_with_saleor_ID.csv` - iHerb product data with Saleor IDs in CSV format
 
 ### Database Services
 
@@ -151,7 +192,12 @@ Make sure the following services are running:
 ### Neo4j Scripts
 
 - **Hybrid Search**: Combines vector similarity and fulltext search
-- **Graph Structure**: Stores products as nodes with relationships
+- **Enhanced Graph Structure**: Stores products as nodes with comprehensive relationships
+- **3-Level Category Hierarchy**: MainCategory → SubCategory → Category relationships
+- **Product-Variant Relationships**: Links products to their variants
+- **Attribute Management**: Stores product attributes as separate nodes
+- **Similarity Relationships**: SIMILAR_TO relationships based on embeddings
+- **Cross-Category Recommendations**: RECOMMENDED_WITH relationships
 - **Category Filtering**: Filter products by categories
 - **ID-based Retrieval**: Get products by specific IDs
 
@@ -186,8 +232,8 @@ Make sure the following services are running:
 3. **Data Loading Errors**
 
    - Verify CSV file exists and has correct format
-   - Check file encoding (should be latin1)
-   - Ensure all required columns are present
+   - Check file encoding (should be utf-8)
+   - Ensure all required columns are present (saleor_product_id, saleor_variant_id, etc.)
 
 4. **Search Performance Issues**
    - Check that indexes are created properly

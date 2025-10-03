@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage
 from backend.infrastructure.agents.salor_graph_ql_agent import (
     run_structured,
     MessagesState,
+    fetch_products_structured,
 )
 
 from dotenv import load_dotenv
@@ -159,6 +160,15 @@ async def chat_bot(
             },
         }
 
+        # Attach structured products when kg_products is present and is a list
+        try:
+            if parsed_kg_products and isinstance(parsed_kg_products, list):
+                structured = fetch_products_structured(parsed_kg_products)
+                result["structured_products"] = structured
+        except Exception:
+            # Non-fatal: continue without structured products
+            pass
+
         # Log like the sample server
         json_obj = {
             'api_name': 'new_saleor_graph_chat_bot',
@@ -265,6 +275,15 @@ async def chat_bot(
                 "model": model or os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
             },
         }
+
+        # Attach structured products when kg_products is present and is a list
+        try:
+            if parsed_kg_products and isinstance(parsed_kg_products, list):
+                structured = fetch_products_structured(parsed_kg_products)
+                result["structured_products"] = structured
+        except Exception:
+            # Non-fatal: continue without structured products
+            pass
 
         # Log like the sample server
         json_obj = {
